@@ -1,0 +1,33 @@
+# Python虚拟环境
+.venv/
+venv/
+ENV/
+env/
+
+# Python缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 环境变量和配置
+.env
+*.env
+
+# 日志和本地数据
+*.log
+memory/
+sessions/
+*.sqlite3
+
+# IDE和系统文件
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 其他你不想上传的文件或文件夹
+# 比如临时图片、用户数据等
+*.png
+*.jpg
+*.jpeg

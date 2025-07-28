@@ -1,0 +1,13 @@
+# requirements.txt
+python-dotenv
+langchain
+langchain-google-genai
+langgraph
+langchain-mcp-adapters
+flask
+uvicorn
+gunicorn  # 推荐在生产环境中使用
+gradio    # 如果您未来还想用Gradio，可以保留
+pillow
+requests
+hypercorn

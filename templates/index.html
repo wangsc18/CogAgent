@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Core Agent Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="{{ url_for('static', filename='chart.js') }}"></script>
+    <style>
+        /* 页面布局和基本样式 */
+        body, html { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+        .app-layout { display: flex; height: 100vh; }
+        .main-content { flex-grow: 1; display: flex; flex-direction: column; background-color: #f4f7f9; }
+        #dashboard-container {
+            display: flex;
+            gap: 20px;
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+            background-color: white;
+            /* 设定一个固定的高度给仪表盘区域 */
+            height: 300px; 
+            min-height: 300px;
+        }
+        .chart-card {
+            flex: 1; /* 让每个卡片都想占据同样多的空间 */
+            min-width: 0; /* 【核心修复1】这是防止内容撑开flex容器的关键！*/
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            /* 让卡片内的flex布局垂直排列 */
+            display: flex;
+            flex-direction: column;
+        }
+        .chart-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #333;
+            /* 防止标题过长换行影响布局 */
+            flex-shrink: 0;
+        }
+        .chart-placeholder {
+            /* 【核心修复2】让这个容器占据卡片内所有剩余空间 */
+            flex-grow: 1;
+            position: relative; /* Chart.js响应式布局需要 */
+            height: 100%; /* 确保它有高度 */
+        }
+
+        /* 聊天界面样式 */
+        .chat-interface-container { position: relative; display: flex; flex-direction: column; flex-grow: 1; height: 0; }
+        .conversation-log { flex-grow: 1; overflow-y: auto; padding: 20px; }
+        .message-row { display: flex; margin-bottom: 12px; }
+        .user-row { justify-content: flex-end; }
+        .alita-row, .system-row { justify-content: flex-start; }
+        .message-bubble { max-width: 70%; padding: 10px 15px; border-radius: 18px; line-height: 1.5; }
+        .user-bubble { background-color: #007bff; color: white; border-bottom-right-radius: 4px; }
+        .alita-bubble { background-color: #f1f0f0; color: black; border-bottom-left-radius: 4px; }
+        .system-bubble { background-color: #fffbe6; color: #8a6d3b; border: 1px solid #ffeeba; font-size: 14px; }
+        .input-area-container { padding: 15px 20px; border-top: 1px solid #e0e0e0; background-color: white; }
+        .input-elements-wrapper { display: flex; align-items: center; gap: 10px; }
+        #command-input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 20px; resize: none; font-size: 16px; }
+        #send-button { background: none; border: none; cursor: pointer; padding: 5px; }
+        .send-icon { width: 24px; height: 24px; color: #007bff; }
+        .footer-text { font-size: 12px; color: #aaa; text-align: center; margin-top: 10px; }
+
+        /* 确认横幅样式 */
+        .confirmation-banner { padding: 12px; background-color: #e6f7ff; border-top: 1px solid #91d5ff; text-align: center; position: sticky; bottom: 85px; z-index: 100; }
+        .confirmation-banner.hidden { display: none; }
+        .confirmation-banner button { margin-left: 15px; padding: 6px 12px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        #confirm-yes { background-color: #28a745; color: white; border: none; }
+        #confirm-no { background-color: #dc3545; color: white; border: none; }
+
+        /* "新建对话" 按钮样式 */
+        #new-chat-button { position: absolute; top: 15px; left: 20px; z-index: 10; padding: 8px 15px; font-size: 14px; font-weight: bold; color: #007bff; background-color: white; border: 1px solid #dee2e6; border-radius: 20px; cursor: pointer; transition: all 0.2s ease-in-out; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        #new-chat-button:hover { background-color: #007bff; color: white; border-color: #007bff; }
+    </style>
+</head>
+<body>
+    <div class="app-layout">
+        <main class="main-content">
+            <div id="dashboard-container" class="dashboard-container">
+                <div class="chart-card">
+                    <div class="chart-title">用户认知负荷变化</div>
+                    <div class="chart-placeholder">
+                        <!-- 2. 用 canvas 替换占位符 div -->
+                        <canvas id="cognitiveLoadChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-title">任务类型分布</div>
+                    <div class="chart-placeholder">
+                        <canvas id="taskTypeChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="chat-interface-container">
+                <button id="new-chat-button">⊕ 新建对话</button>
+                <div id="conversation-log" class="conversation-log"></div>
+                <div id="confirmation-banner" class="confirmation-banner hidden">
+                    <span id="confirmation-text"></span>
+                    <button id="confirm-yes">是的，请帮助我</button>
+                    <button id="confirm-no">不了，谢谢</button>
+                </div>
+                <div class="input-area-container">
+                    <div class="input-elements-wrapper">
+                        <div class="main-input-group">
+                            <textarea id="command-input" placeholder="Ask anything..." rows="1" aria-label="Command input"></textarea>
+                        </div>
+                        <button id="send-button" aria-label="Send message">
+                            <svg class="send-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M3.105 3.105a.75.75 0 01.924-.638l12.582 4.193a.75.75 0 010 1.27l-12.582 4.193a.75.75 0 01-.924-.638V9.75H8.5a.75.75 0 000-1.5H3.105V3.105z"/></svg>
+                        </button>
+                    </div>
+                    <div class="footer-text">
+                        Agent can make mistakes. Consider checking important information.
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // --- 获取页面元素 ---
+            const conversationLog = document.getElementById("conversation-log");
+            const commandInput = document.getElementById("command-input");
+            const sendButton = document.getElementById("send-button");
+            const confirmationBanner = document.getElementById("confirmation-banner");
+            const confirmationText = document.getElementById("confirmation-text");
+            const confirmYesBtn = document.getElementById("confirm-yes");
+            const confirmNoBtn = document.getElementById("confirm-no");
+            const newChatButton = document.getElementById("new-chat-button");
+            
+            // --- 会话ID管理 ---
+            let sessionId = localStorage.getItem('agentSessionId');
+            if (!sessionId) {
+                sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+                localStorage.setItem('agentSessionId', sessionId);
+            }
+            console.log("Using session ID:", sessionId);
+
+            let currentAssistanceRequestId = null;
+            let inquiryTimeoutId = null;
+
+            // --- 辅助函数 ---
+            function escapeHtml(text) { const div = document.createElement("div"); div.textContent = text; return div.innerHTML; }
+            function textToHtml(text) { return escapeHtml(String(text)).replace(/\n/g, "<br>"); }
+            function adjustTextareaHeight() { if (!commandInput) return; commandInput.style.height = "auto"; const maxHeight = parseFloat(getComputedStyle(commandInput).lineHeight) * 4; commandInput.style.height = Math.min(commandInput.scrollHeight, maxHeight) + "px"; commandInput.style.overflowY = (commandInput.scrollHeight > maxHeight) ? "auto" : "hidden"; }
+            function appendMessage(sender, text) {
+                const senderClass = sender === "You" ? "user" : (sender.startsWith("Agent") ? "alita" : "system");
+                const messageRow = document.createElement("div");
+                messageRow.classList.add("message-row", senderClass + "-row");
+                const messageBubble = document.createElement("div");
+                messageBubble.classList.add("message-bubble", senderClass + "-bubble");
+                const senderStrong = document.createElement("strong");
+                senderStrong.textContent = sender + ": ";
+                messageBubble.appendChild(senderStrong);
+                const contentSpan = document.createElement("span");
+                contentSpan.innerHTML = textToHtml(text);
+                messageBubble.appendChild(contentSpan);
+                messageRow.appendChild(messageBubble);
+                conversationLog.appendChild(messageRow);
+                conversationLog.scrollTop = conversationLog.scrollHeight;
+            }
+
+            // --- 3. 图表初始化和更新逻辑 ---
+            const CHART_DATA_LIMIT = 20;
+
+            // --- 1. 初始化折线图 ---
+            const ctxLine = document.getElementById('cognitiveLoadChart').getContext('2d');
+            const lineChartData = {
+                labels: [],
+                datasets: [
+                    { label: '打开应用数', data: [], borderColor: 'rgb(255, 99, 132)', backgroundColor: 'rgba(255, 99, 132, 0.5)', yAxisID: 'y', tension: 0.3 },
+                    { label: '键盘频率 (Hz)', data: [], borderColor: 'rgb(54, 162, 235)', backgroundColor: 'rgba(54, 162, 235, 0.5)', yAxisID: 'y1', tension: 0.3 },
+                    { label: '鼠标频率 (Hz)', data: [], borderColor: 'rgb(75, 192, 192)', backgroundColor: 'rgba(75, 192, 192, 0.5)', yAxisID: 'y1', tension: 0.3 }
+                ]
+            };
+            const cognitiveLoadChart = new Chart(ctxLine, {
+                type: 'line',
+                data: lineChartData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false, // 【核心修复3】这是让图表填充容器的关键！
+                    scales: {
+                        y: { type: 'linear', display: true, position: 'left', title: { display: true, text: '应用数' } },
+                        y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: '频率 (Hz)' }, grid: { drawOnChartArea: false } },
+                    },
+                    animation: { duration: 500 }
+                }
+            });
+
+            function updateCognitiveLoadChart(dataPoint) {
+                lineChartData.labels.push(dataPoint.timestamp);
+                lineChartData.datasets[0].data.push(dataPoint.apps);
+                lineChartData.datasets[1].data.push(dataPoint.keyboard);
+                lineChartData.datasets[2].data.push(dataPoint.mouse);
+                if (lineChartData.labels.length > CHART_DATA_LIMIT) {
+                    lineChartData.labels.shift();
+                    lineChartData.datasets.forEach(dataset => { dataset.data.shift(); });
+                }
+                cognitiveLoadChart.update();
+            }
+
+            // --- 2. 【关键新增】初始化柱状图 (使用静态数据作为示例) ---
+            const ctxBar = document.getElementById('taskTypeChart').getContext('2d');
+            const barChartData = {
+                labels: ['代码编写', '文档阅读', '沟通', '其他'],
+                datasets: [{
+                    label: '任务时长 (分钟)',
+                    data: [45, 25, 15, 5], // 示例数据
+                    backgroundColor: [
+                        'rgba(255, 99, 132, 0.6)',
+                        'rgba(54, 162, 235, 0.6)',
+                        'rgba(255, 206, 86, 0.6)',
+                        'rgba(153, 102, 255, 0.6)'
+                    ],
+                    borderColor: [
+                        'rgba(255, 99, 132, 1)',
+                        'rgba(54, 162, 235, 1)',
+                        'rgba(255, 206, 86, 1)',
+                        'rgba(153, 102, 255, 1)'
+                    ],
+                    borderWidth: 1
+                }]
+            };
+            new Chart(ctxBar, {
+                type: 'bar', // 类型为 bar
+                data: barChartData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true } },
+                    plugins: { legend: { display: false } } // 隐藏图例，让图表更简洁
+                }
+            });
+
+            // --- 核心功能：发送用户输入的消息 ---
+            async function sendMessage() {
+                const userInput = commandInput.value.trim();
+                if (userInput === "") return;
+                appendMessage("You", userInput);
+                commandInput.value = "";
+                adjustTextareaHeight();
+                sendButton.disabled = true;
+                try {
+                    const response = await fetch("/chat", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ message: userInput, session_id: sessionId })
+                    });
+                    if (!response.ok) { const errorData = await response.json(); throw new Error(errorData.error || "Server error"); }
+                    const data = await response.json();
+                    appendMessage("Agent", data.response);
+                } catch (error) {
+                    appendMessage("System Error", error.message);
+                } finally {
+                    sendButton.disabled = false;
+                    commandInput.focus();
+                }
+            }
+
+            // --- 核心功能：处理用户对主动服务的确认 ---
+            confirmYesBtn.addEventListener("click", async function() {
+                if (inquiryTimeoutId) clearTimeout(inquiryTimeoutId); // 清除计时器
+                inquiryTimeoutId = null;
+
+                if (!currentAssistanceRequestId) return;
+                confirmationBanner.classList.add("hidden");
+                appendMessage("System", "好的，正在为您分析情况...");
+                try {
+                const response = await fetch("/request_assistance", { 
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ 
+                        request_id: currentAssistanceRequestId,
+                        session_id: sessionId // <-- 将主会话ID发回
+                    })
+                });
+                    if (!response.ok) { const errorData = await response.json(); throw new Error(errorData.error || "Server error"); }
+                    const data = await response.json();
+                    appendMessage("Agent (Proactive)", data.response);
+                } catch (error) {
+                    appendMessage("System Error", error.message);
+                } finally {
+                    currentAssistanceRequestId = null;
+                }
+            });
+
+            confirmNoBtn.addEventListener("click", function() {
+                if (inquiryTimeoutId) clearTimeout(inquiryTimeoutId); // 清除计时器
+                inquiryTimeoutId = null;
+
+                confirmationBanner.classList.add("hidden");
+                appendMessage("System", "好的，如果您需要帮助，可以随时向我提问。");
+                currentAssistanceRequestId = null;
+            });
+
+            // --- 核心功能：监听来自服务器的 Server-Sent Events ---
+            console.log("Connecting to SSE stream at /listen");
+            const sse = new EventSource("/listen");
+            sse.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'state_update') {
+                        updateCognitiveLoadChart(data.data);
+                    } 
+                    else if (data.type === 'inquiry') {
+                        console.log("Received inquiry from server:", data);
+
+                        // 1. 如果上一个询问的计时器还在，先清除它
+                        if (inquiryTimeoutId) {
+                            clearTimeout(inquiryTimeoutId);
+                        }
+
+                        // 2. 更新弹窗内容并显示
+                        confirmationText.textContent = data.text;
+                        currentAssistanceRequestId = data.request_id; 
+                        confirmationBanner.classList.remove("hidden");
+                        
+                        // 3. 设置一个新的20秒计时器，超时后自动隐藏弹窗
+                        inquiryTimeoutId = setTimeout(() => {
+                            console.log("Inquiry timed out. Hiding banner.");
+                            confirmationBanner.classList.add("hidden");
+                            appendMessage("System", "系统建议已超时，自动为您关闭。");
+                            currentAssistanceRequestId = null; // 清理ID
+                            inquiryTimeoutId = null; // 清理计时器ID
+                        }, 20000); // 20000毫秒 = 20秒
+                    }
+                } catch (e) { console.error("Error parsing SSE data:", e); }
+            };
+            sse.onerror = function(error) { console.error("SSE connection error:", error); sse.close(); };
+
+            // --- 事件绑定 ---
+            sendButton.addEventListener("click", sendMessage);
+            commandInput.addEventListener("input", adjustTextareaHeight);
+            commandInput.addEventListener("keydown", function(event) { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendMessage(); } });
+            newChatButton.addEventListener("click", function() { localStorage.removeItem('agentSessionId'); location.reload(); });
+            
+            adjustTextareaHeight();
+        });
+    </script>
+</body>
+</html>

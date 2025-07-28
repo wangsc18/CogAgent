@@ -1,0 +1,39 @@
+{
+  "mcpServers": {
+
+    "baidu_map_server": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@baidumap/mcp-server-baidu-map"
+      ],
+      "env": {
+        "BAIDU_MAP_API_KEY": "$BAIDU_MAP_API_KEY"
+      }
+    },
+
+    "filesystem_server": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "E:\\人机交互\\CHI2026\\CogAgent\\AgentCode2.0"
+      ]
+    },
+
+    "github_server": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_TOKEN": "$GITHUB_TOKEN"
+      }
+    }
+    
+  }
+}
