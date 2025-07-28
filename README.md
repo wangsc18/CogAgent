@@ -31,22 +31,23 @@
 ```
 
 ## 3. 安装与运行
-** 1. 创建虚拟环境 **
+1. 创建虚拟环境 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
 ```
 
-** 2. 安装依赖库 **
+2. 安装依赖库
 ```bash
 pip install -r requirements.txt
 ```
 
-** 3. 配置环境 **
+3. 配置环境
+
 创建.env文件，配置GOOGLE_API_KEY, BAIDU_MAP_API_KEY, GITHUB_TOKEN等需要的API
 如果需要开启代理，在web_app.py中配置os.environ对应的代理
 
-** 4. 通过ASGI服务器启动异步web应用 **
+4. 通过ASGI服务器启动异步web应用
 ```bash
 hypercorn web_app:app --bind 0.0.0.0:5001
 ```
