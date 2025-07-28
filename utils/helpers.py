@@ -43,12 +43,16 @@ def load_user_habits() -> dict:
     return {}
 
 def take_screenshot() -> str:
-    """截取当前桌面并返回Base64编码的字符串。"""
+    """截取当前桌面并返回Base64编码的字符串（去掉右侧750px）。"""
     logging.info("[截图] 正在截取当前桌面...")
     try:
         path = "desktop_screenshot.png"
         screenshot = ImageGrab.grab()
-        screenshot.save(path)
+        width, height = screenshot.size
+        # 裁剪：保留左侧 width-750 区域
+        crop_width = max(width - 750, 1)
+        cropped = screenshot.crop((0, 0, crop_width, height))
+        cropped.save(path)
         logging.info(f"[截图] 截图已保存到 {path}")
         with open(path, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode('utf-8')

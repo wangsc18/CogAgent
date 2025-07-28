@@ -62,6 +62,8 @@ def run_planner(state: AgentState, llm, tools_config: dict, user_habits: dict) -
 
     user_habits_str = f"\n# 用户长期偏好:\n{json.dumps(user_habits, indent=2, ensure_ascii=False)}\n" if user_habits else ""
 
+# 需要根据habits修改主动服务生成内容的风格
+
     prompt = f"""
 你是一个能够感知用户实时状态的、有同理心的对话助手。
 

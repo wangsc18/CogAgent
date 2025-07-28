@@ -62,7 +62,7 @@ hypercorn web_app:app --bind 0.0.0.0:5001
     *   **内容**:
         *   Flask 应用的实例化。
         *   定义所有 API 端点 (路由)，如 `/chat`, `/listen`, `/request_assistance`。
-        *   管理**会话状态**的加载 (`get_session_state`) 和保存 (`save_session_state`)，实现了本地 JSON 持久化。
+        *   管理**会话状态**的加载 (`get_session_state`) 和保存 (`save_session_state`)，实现了JSON格式保存对话历史。
         *   在启动时调用 `initialize_system` 来构建 Agent 图，并启动后台服务线程。
     *   **注意**: 这是一个**异步 Flask 应用**，所有与 Agent 交互的路由都是 `async def`，并使用 `await` 调用 Agent。
 
