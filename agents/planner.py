@@ -54,7 +54,7 @@ def run_planner(state: AgentState, llm, tools_config: dict, user_habits: dict) -
 
         # 你的任务:
         1.  查看对话历史中的最后一条 `tool` 消息。
-        2.  生成一段友好的、人性化的文本，将这条 `tool` 消息的内容（很可能是一个URL）清晰地告知用户。
+        2.  生成一段友好的、人性化的文本，将这条 `tool` 消息的内容清晰地告知用户。
 
         严格按照以下JSON格式输出：
         {{"response": "给用户的、包含了工具结果的回答内容"}}

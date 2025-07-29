@@ -10,19 +10,7 @@
         "@antv/mcp-server-chart"
       ]
     },
-
-    "baidu_map_server": {
-      "transport": "stdio",
-      "command": "npx",
-      "args": [
-        "-y",
-        "@baidumap/mcp-server-baidu-map"
-      ],
-      "env": {
-        "BAIDU_MAP_API_KEY": "$BAIDU_MAP_API_KEY"
-      }
-    },
-
+    
     "filesystem_server": {
       "transport": "stdio",
       "command": "npx",
