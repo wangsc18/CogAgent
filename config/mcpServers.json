@@ -1,6 +1,16 @@
 {
   "mcpServers": {
 
+    "mcp-server-chart": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@antv/mcp-server-chart"
+      ]
+    },
+
     "baidu_map_server": {
       "transport": "stdio",
       "command": "npx",
