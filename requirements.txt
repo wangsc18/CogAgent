@@ -4,10 +4,16 @@ langchain
 langchain-google-genai
 langgraph
 langchain-mcp-adapters
+langchain-community
 flask
 uvicorn
-gunicorn  # 推荐在生产环境中使用
-gradio    # 如果您未来还想用Gradio，可以保留
+gunicorn
+gradio
 pillow
 requests
 hypercorn
+mcp[cli]
+python-pptx
+fonttools
+pypdf
+docx2txt

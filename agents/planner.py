@@ -4,6 +4,8 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from state import AgentState
 from utils.helpers import log_message
 
+MAX_FILE_CONTENT_CHARS = 12000
+
 def run_planner(state: AgentState, llm, tools_config: dict, user_habits: dict) -> AgentState:
     """
     核心决策节点。它能处理标准文本和多模态输入，
@@ -23,20 +25,40 @@ def run_planner(state: AgentState, llm, tools_config: dict, user_habits: dict) -
 
     # --- 2. 格式化完整的历史记录 ---
     last_message = state['messages'][-1]
+    
+    current_file_context_str = ""
+    file_info = {}
+    # 【核心修正】从 additional_kwargs 中安全地获取文件信息
+    if isinstance(last_message, HumanMessage) and last_message.additional_kwargs and "file" in last_message.additional_kwargs:
+        file_info = last_message.additional_kwargs["file"]
+        content = file_info.get("text_content")
+        
+        if content:
+            file_name = file_info.get('name', 'N/A')
+            if len(content) > MAX_FILE_CONTENT_CHARS:
+                content = content[:MAX_FILE_CONTENT_CHARS] + f"\n\n[... 文件 '{file_name}' 内容过长，已被截断 ...]"
+            
+        current_file_context_str = f"""
+        # 附加的文件内容 (来自文件: {file_name}):
+        --- START OF FILE CONTENT ---
+        {content}
+        --- END OF FILE CONTENT ---
+        """
 
     # 使用健壮的、能处理多种消息类型的历史记录格式化逻辑
     formatted_history = []
     for msg in state['messages']:
-        if isinstance(msg.content, str):
-            content_str = msg.content
-        elif isinstance(msg.content, list): # 正确处理历史中的多模态消息
-            text_parts = [part['text'] for part in msg.content if part['type'] == 'text']
-            content_str = "\n".join(text_parts) + " [An image was also provided]"
-        else:
-            content_str = str(msg.content)
-            
+        # HumanMessage 的 content 现在保证是字符串
+        content_str = str(msg.content)
+        
+        # 检查是否有附加文件，并在历史记录中进行标注
+        if isinstance(msg, HumanMessage) and msg.additional_kwargs and "file" in msg.additional_kwargs:
+            file_name = msg.additional_kwargs["file"].get("name")
+            content_str += f" [附加文件: {file_name}]"
+
         if hasattr(msg, 'tool_calls') and msg.tool_calls:
             content_str += f" (Tool Call: {json.dumps(msg.tool_calls)})"
+            
         formatted_history.append(f"{msg.type}: {content_str}")
     history_str = "\n".join(formatted_history)
 
@@ -89,9 +111,9 @@ def run_planner(state: AgentState, llm, tools_config: dict, user_habits: dict) -
 
         prompt = f"""
         你是一个能够感知用户实时状态的、有同理心的对话助手。
-
         {user_habits_str}
         {cognitive_context_str}
+        {current_file_context_str}
         # 对话历史:
         {history_str}
         # 可用工具列表:
@@ -100,12 +122,13 @@ def run_planner(state: AgentState, llm, tools_config: dict, user_habits: dict) -
         # 你的核心任务指令:
         1.  **分析意图**: 首先，仔细分析用户的最新请求和整个对话历史，理解用户的真实意图。
         2.  **决策**: 根据意图，在以下行动中选择一个：
-            a. **调用工具**: 如果用户的请求需要外部信息或特定功能（如图表绘制），请选择调用相应的工具。
-            b. **直接回复**: 如果你可以直接回答，或者需要对工具的结果进行总结，请直接生成回复。
-        3.  **遵循特定规则**:
-            *   **处理工具结果**: 如果对话历史的最后一条消息是 `tool` 类型，并且其内容是一个 URL (例如 `https://...`)，你的**唯一任务**就是生成一段友好的文本，将这个 URL 清晰地呈现给用户。例如："好的，我已经为您生成了图表，您可以在这里查看：[URL]"。
-            *   **感知用户状态**: 如果用户的实时状态（`user_state`）显示高负荷（例如 `keyboard_hz > 5.0`），你的**所有文本回复都必须极其简洁**，最好是一句话或要点列表。
-            *   **遵循用户偏好**: 总是优先考虑用户的长期偏好（`user_habits`）来决定你的沟通风格。
+            a. **调用工具**: 如果用户的请求需要外部信息或特定功能，请选择调用相应的工具。
+            b. **直接回复**: 如果你可以直接回答，请直接生成回复。
+        3.  **遵循特定规则 (按优先级排序)**:
+            *   **【处理附加文件】**: 如果“附加的文件内容”部分存在，并且用户的请求与该文件内容相关（例如“总结一下”、“这个文档讲了什么？”），你的**首要任务**是基于该文件内容生成回答。只有当用户的请求是关于文件本身的操作（如“转换格式”）时，才考虑调用工具。
+            *   **【处理工具结果】**: 如果对话历史的最后一条消息是 `tool` 类型，你的任务就是生成一段友好的文本，将这条 `tool` 消息的内容清晰地告知用户。
+            *   **【感知用户状态】**: 如果用户的实时状态（`user_state`）显示高负荷（例如 `keyboard_hz > 5.0`），你的**所有文本回复都必须极其简洁**，最好是一句话或要点列表。
+            *   **【遵循用户偏好】**: 总是优先考虑用户的长期偏好（`user_habits`）来决定你的沟通风格。
         """
 
         prompt += """
