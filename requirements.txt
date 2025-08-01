@@ -4,7 +4,7 @@ langchain
 langchain-google-genai
 langgraph
 langchain-mcp-adapters
-flask # flask[async]
+flask[async] #flask
 uvicorn
 gunicorn  # 推荐在生产环境中使用
 gradio    # 如果您未来还想用Gradio，可以保留
@@ -13,3 +13,8 @@ requests
 hypercorn
 pygetwindow
 pynput 
+opencv-python
+numpy
+pywin32
+torch
+torchvision

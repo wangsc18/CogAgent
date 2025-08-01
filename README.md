@@ -19,6 +19,8 @@
 |-- utils/
 |   |-- helpers.py            # 辅助函数 (截图等)
 |   |-- mcp_config_loader.py  # MCP配置加载器
+|   |-- realtime_detection # 视频模块
+|   |-- activity_monitor.py # 检测键鼠输入频率
 |-- config/
 |   |-- mcpServers.json       # MCP服务器定义
 |   |-- user_habits.json      # 用户习惯配置

@@ -31,3 +31,6 @@ Thumbs.db
 *.png
 *.jpg
 *.jpeg
+
+# 模型
+utils\realtime_detection\best_resnet3d.pth
