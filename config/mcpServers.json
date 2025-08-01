@@ -1,36 +1,37 @@
-{
-  "mcpServers": {
+// {
+//   "mcpServers": {
 
-    "mcp-server-chart": {
-      "command": "cmd",
-      "args": [
-        "/c",
-        "npx",
-        "-y",
-        "@antv/mcp-server-chart"
-      ]
-    },
+//     "mcp-server-chart": {
+//       "command": "cmd",
+//       "args": [
+//         "/c",
+//         "npx",
+//         "-y",
+//         "@antv/mcp-server-chart"
+//       ]
+//     },
     
-    "ppt": {
-      "command": "python",
-      "args": [
-        "config/mcptools/Office-PowerPoint-MCP-Server/ppt_mcp_server.py"
-      ],
-      "env": {
-        "PYTHONPATH": "config/mcptools/Office-PowerPoint-MCP-Server",
-        "PPT_TEMPLATE_PATH": "config/mcptools/MCP_tools/Office-PowerPoint-MCP-Server/templates"
-      }
-    },
+//     "filesystem_server": {
+//       "transport": "stdio",
+//       "command": "npx",
+//       "args": [
+//         "-y",
+//         "@modelcontextprotocol/server-filesystem",
+//         "E:\\人机交互\\CHI2026\\CogAgent\\AgentCode2.0"
+//       ]
+//     },
+
+//     "github_server": {
+//       "transport": "stdio",
+//       "command": "npx",
+//       "args": [
+//         "-y",
+//         "@modelcontextprotocol/server-github"
+//       ],
+//       "env": {
+//         "GITHUB_TOKEN": "$GITHUB_TOKEN"
+//       }
+//     }
     
-    "filesystem_server": {
-      "transport": "stdio",
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "E:/人机交互/CHI2026/CogAgent/AgentCode2.0"
-      ]
-    }
-    
-  }
-}
+//   }
+// }
