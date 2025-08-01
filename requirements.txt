@@ -5,9 +5,10 @@ langchain-google-genai
 langgraph
 langchain-mcp-adapters
 flask[async] #flask
+langchain-community
 uvicorn
-gunicorn  # 推荐在生产环境中使用
-gradio    # 如果您未来还想用Gradio，可以保留
+gunicorn
+gradio
 pillow
 requests
 hypercorn
@@ -18,3 +19,10 @@ numpy
 pywin32
 torch
 torchvision
+
+mcp[cli]
+python-pptx
+fonttools
+pypdf
+docx2txt
+

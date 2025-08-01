@@ -10,41 +10,10 @@
         body, html { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
         .app-layout { display: flex; height: 100vh; }
         .main-content { flex-grow: 1; display: flex; flex-direction: column; background-color: #f4f7f9; }
-        #dashboard-container {
-            display: flex;
-            gap: 20px;
-            padding: 20px;
-            border-bottom: 1px solid #e0e0e0;
-            background-color: white;
-            /* 设定一个固定的高度给仪表盘区域 */
-            height: 300px; 
-            min-height: 300px;
-        }
-        .chart-card {
-            flex: 1; /* 让每个卡片都想占据同样多的空间 */
-            min-width: 0; /* 【核心修复1】这是防止内容撑开flex容器的关键！*/
-            background-color: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-            /* 让卡片内的flex布局垂直排列 */
-            display: flex;
-            flex-direction: column;
-        }
-        .chart-title {
-            font-size: 16px;
-            font-weight: 600;
-            margin-bottom: 15px;
-            color: #333;
-            /* 防止标题过长换行影响布局 */
-            flex-shrink: 0;
-        }
-        .chart-placeholder {
-            /* 【核心修复2】让这个容器占据卡片内所有剩余空间 */
-            flex-grow: 1;
-            position: relative; /* Chart.js响应式布局需要 */
-            height: 100%; /* 确保它有高度 */
-        }
+        #dashboard-container { display: flex; gap: 20px; padding: 20px; border-bottom: 1px solid #e0e0e0; background-color: white; height: 300px; min-height: 300px; }
+        .chart-card { flex: 1; min-width: 0; background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); display: flex; flex-direction: column; }
+        .chart-title { font-size: 16px; font-weight: 600; margin-bottom: 15px; color: #333; flex-shrink: 0; }
+        .chart-placeholder { flex-grow: 1; position: relative; height: 100%; }
 
         /* 聊天界面样式 */
         .chat-interface-container { position: relative; display: flex; flex-direction: column; flex-grow: 1; height: 0; }
@@ -52,19 +21,23 @@
         .message-row { display: flex; margin-bottom: 12px; }
         .user-row { justify-content: flex-end; }
         .alita-row, .system-row { justify-content: flex-start; }
-        .message-bubble { max-width: 70%; padding: 10px 15px; border-radius: 18px; line-height: 1.5; }
+        .message-bubble { max-width: 70%; padding: 10px 15px; border-radius: 18px; line-height: 1.5; word-wrap: break-word; }
         .user-bubble { background-color: #007bff; color: white; border-bottom-right-radius: 4px; }
         .alita-bubble { background-color: #f1f0f0; color: black; border-bottom-left-radius: 4px; }
         .system-bubble { background-color: #fffbe6; color: #8a6d3b; border: 1px solid #ffeeba; font-size: 14px; }
+        
+        /* 输入区域，包含文件上传 */
         .input-area-container { padding: 15px 20px; border-top: 1px solid #e0e0e0; background-color: white; }
         .input-elements-wrapper { display: flex; align-items: center; gap: 10px; }
         #command-input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 20px; resize: none; font-size: 16px; }
-        #send-button { background: none; border: none; cursor: pointer; padding: 5px; }
+        #send-button, #file-upload-button { background: none; border: none; cursor: pointer; padding: 5px; display: flex; align-items: center; }
         .send-icon { width: 24px; height: 24px; color: #007bff; }
+        .upload-icon { width: 22px; height: 22px; color: #6c757d; }
+        #file-upload-status { font-size: 12px; color: #007bff; margin-top: 5px; height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .footer-text { font-size: 12px; color: #aaa; text-align: center; margin-top: 10px; }
 
         /* 确认横幅样式 */
-        .confirmation-banner { padding: 12px; background-color: #e6f7ff; border-top: 1px solid #91d5ff; text-align: center; position: sticky; bottom: 85px; z-index: 100; }
+        .confirmation-banner { padding: 12px; background-color: #e6f7ff; border-top: 1px solid #91d5ff; text-align: center; position: sticky; bottom: 100px; z-index: 100; }
         .confirmation-banner.hidden { display: none; }
         .confirmation-banner button { margin-left: 15px; padding: 6px 12px; border-radius: 5px; cursor: pointer; font-weight: bold; }
         #confirm-yes { background-color: #28a745; color: white; border: none; }
@@ -103,16 +76,24 @@
                 </div>
                 <div class="input-area-container">
                     <div class="input-elements-wrapper">
-                        <div class="main-input-group">
-                            <textarea id="command-input" placeholder="Ask anything..." rows="1" aria-label="Command input"></textarea>
+                        <button id="file-upload-button" type="button" aria-label="Attach file">
+                            <svg class="upload-icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" width="22" height="22">
+                                <path d="M924.672 126.976q36.864 36.864 54.784 82.432t17.92 93.696-17.92 93.696-54.784 82.432l-392.192 389.12q-36.864 36.864-90.624 61.44t-113.664 28.672-122.368-16.384-115.712-73.728q-52.224-52.224-72.704-113.152t-16.384-121.344 28.16-113.664 60.928-90.112l348.16-345.088q9.216-9.216 27.136-4.608t27.136 13.824q8.192 9.216 13.312 27.136t-4.096 27.136l-347.136 344.064q-27.648 27.648-46.08 64.512t-21.504 78.848 12.288 84.992 55.296 82.944q35.84 35.84 79.36 50.688t86.528 12.288 81.92-18.944 66.56-44.032l391.168-388.096q27.648-27.648 39.424-57.344t11.264-58.88-13.824-56.832-36.864-51.2q-44.032-43.008-98.816-40.448t-110.08 57.856l-353.28 351.232q-23.552 23.552-23.04 52.224t18.944 47.104q22.528 22.528 51.712 18.432t47.616-22.528l320.512-318.464q9.216-9.216 27.136-4.608t27.136 13.824 14.336 27.136-4.096 27.136l-321.536 318.464q-36.864 36.864-70.656 51.2t-63.488 12.8-55.296-15.872-47.104-34.816q-17.408-16.384-31.232-41.984t-15.872-56.32 10.752-65.536 49.664-70.656q18.432-18.432 32.768-33.792 12.288-13.312 23.04-23.552t11.776-11.264l285.696-284.672q36.864-36.864 80.384-57.856t88.576-24.064 88.576 12.288 80.384 52.224z"></path>
+                            </svg>
+                        </button>
+                        <input type="file" id="file-input" style="display: none;">
+                        
+                        <div class="main-input-group" style="flex-grow: 1;">
+                            <textarea id="command-input" placeholder="输入消息，或点击左侧回形针上传文件..." rows="1"></textarea>
                         </div>
                         <button id="send-button" aria-label="Send message">
-                            <svg class="send-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M3.105 3.105a.75.75 0 01.924-.638l12.582 4.193a.75.75 0 010 1.27l-12.582 4.193a.75.75 0 01-.924-.638V9.75H8.5a.75.75 0 000-1.5H3.105V3.105z"/></svg>
+                            <svg class="send-icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="#007bff">
+                                <path d="M664.88260888 860.06521777a50.98695644 50.98695644 0 0 0 77.1652169-28.79999999l189.86087021-670.89130489A71.17826045 71.17826045 0 0 0 883.26956533 72.56521777a70.55217422 70.55217422 0 0 0-49.06956533 3.75652178L119.13043467 406.34782578a51.26086934 51.26086934 0 0 0-6.73043467 89.3347831l149.24347822 98.41304356a31.30434756 31.30434756 0 1 0 34.43478223-52.27826132l-132.18260801-87.1826089 696.52173868-321.45652177a7.94347822 7.94347822 0 0 1 5.55652177-0.43043467 8.56956533 8.56956533 0 0 1 5.67391289 10.56521777L686.13043467 799.1l-132.45652178-87.37826045a39.13043467 39.13043467 0 0 0-53.53043466 10.09565157l-72.46956534 102.52173954v-205.70869599l274.38260889-226.09565244a31.30434756 31.30434756 0 1 0-39.79565244-48.32608624l-282.91304356 233.13912979a39.13043467 39.13043467 0 0 0-14.282608 30.20869599v290.73913067a39.13043467 39.13043467 0 0 0 71.09999999 22.53912979l102.01304268-144.35217335 126.7434791 83.62173868z"></path>
+                            </svg>
                         </button>
                     </div>
-                    <div class="footer-text">
-                        Agent can make mistakes. Consider checking important information.
-                    </div>
+                    <div id="file-upload-status"></div>
+                    <div class="footer-text">Agent can make mistakes. Consider checking important information.</div>
                 </div>
             </div>
         </main>
@@ -129,6 +110,9 @@
             const confirmYesBtn = document.getElementById("confirm-yes");
             const confirmNoBtn = document.getElementById("confirm-no");
             const newChatButton = document.getElementById("new-chat-button");
+            const fileInput = document.getElementById("file-input");
+            const fileUploadStatus = document.getElementById("file-upload-status");
+            const fileUploadButton = document.getElementById("file-upload-button");
             
             // --- 会话ID管理 ---
             let sessionId = localStorage.getItem('agentSessionId');
@@ -140,6 +124,7 @@
 
             let currentAssistanceRequestId = null;
             let inquiryTimeoutId = null;
+            let attachedFile = null;
 
             // --- 辅助函数 ---
             function escapeHtml(text) { const div = document.createElement("div"); div.textContent = text; return div.innerHTML; }
@@ -201,7 +186,7 @@
                 cognitiveLoadChart.update();
             }
 
-            // --- 2. 【关键新增】初始化柱状图 (使用静态数据作为示例) ---
+            // --- 2. 初始化柱状图 (使用静态数据作为示例) ---
             const ctxBar = document.getElementById('taskTypeChart').getContext('2d');
             const barChartData = {
                 labels: ['代码编写', '文档阅读', '沟通', '其他'],
@@ -234,19 +219,57 @@
                 }
             });
 
+            // --- 文件上传功能 ---
+            fileUploadButton.addEventListener("click", () => fileInput.click());
+
+            fileInput.addEventListener("change", function(event) {
+                const file = event.target.files[0];
+                if (!file) {
+                    attachedFile = null;
+                    fileUploadStatus.textContent = "";
+                    return;
+                }
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    attachedFile = {
+                        name: file.name,
+                        content: e.target.result.split(',')[1] // 获取 Base64 部分
+                    };
+                    fileUploadStatus.textContent = `已附加: ${file.name}`;
+                    console.log("File attached:", attachedFile.name);
+                };
+                reader.onerror = function(e) {
+                    console.error("File reading error:", e);
+                    fileUploadStatus.textContent = "读取文件出错";
+                    attachedFile = null;
+                };
+                reader.readAsDataURL(file);
+            });
+
             // --- 核心功能：发送用户输入的消息 ---
             async function sendMessage() {
                 const userInput = commandInput.value.trim();
-                if (userInput === "") return;
-                appendMessage("You", userInput);
+                if (userInput === "" && !attachedFile) return;
+
+                appendMessage("You", userInput + (attachedFile ? ` (文件: ${attachedFile.name})` : ""));
+                
+                const payload = {
+                    message: userInput,
+                    session_id: sessionId
+                };
+                if (attachedFile) {
+                    payload.file = attachedFile;
+                }
+                
                 commandInput.value = "";
                 adjustTextareaHeight();
                 sendButton.disabled = true;
+                
                 try {
                     const response = await fetch("/chat", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ message: userInput, session_id: sessionId })
+                        body: JSON.stringify(payload)
                     });
                     if (!response.ok) { const errorData = await response.json(); throw new Error(errorData.error || "Server error"); }
                     const data = await response.json();
@@ -254,6 +277,9 @@
                 } catch (error) {
                     appendMessage("System Error", error.message);
                 } finally {
+                    attachedFile = null;
+                    fileInput.value = "";
+                    fileUploadStatus.textContent = "";
                     sendButton.disabled = false;
                     commandInput.focus();
                 }

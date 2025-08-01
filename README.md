@@ -39,9 +39,9 @@ python -m venv .venv
 .venv\Scripts\activate
 ```
 
-2. 安装依赖库
+2. 本环境下安装依赖库
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 3. 配置环境

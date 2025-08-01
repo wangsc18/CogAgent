@@ -4,15 +4,20 @@ import sys
 import json
 import uuid
 import queue
+import base64
 import asyncio
+import tempfile
 import threading
 import traceback
 from functools import partial
 from flask import Flask, render_template, request, jsonify, Response
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, SystemMessage, ToolMessage
+
 from utils.activity_monitor import monitor
 from utils.face_thread import visual_detector
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
+
 # --- 路径和模块导入 ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = current_dir
@@ -70,6 +75,8 @@ def initialize_system():
     discovered_tools = loop.run_until_complete(mcp_client.get_tools())
     print(f"Discovered {len(discovered_tools)} tools.")
     tools_config = {tool.name: {"description": tool.description, "args_schema": tool.args_schema} for tool in discovered_tools}
+    # for tool in discovered_tools:
+    #     print(tool)
     executable_tools = {tool.name: tool for tool in discovered_tools}
     llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
     user_habits = load_user_habits()
@@ -129,13 +136,9 @@ def save_session_state(session_id: str, state: dict):
     except Exception as e:
         print(f"Error saving session '{session_id}' to file: {e}")
 
-# --- 在全局作用域执行初始化 ---
+# --- 在全局作用域执行初始化和后台线程启动 ---
 initialize_system()
-
-# --- Flask 应用定义 ---
 app = Flask(__name__)
-
-# --- 在全局作用域启动后台线程 ---
 proactive_thread = threading.Thread(
     target=proactive_monitoring_loop, 
     args=(SESSIONS, message_queue, pending_assistance_requests),
@@ -150,18 +153,72 @@ def index():
 
 @app.route('/chat', methods=['POST'])
 async def chat():
-    if not core_agent_app: return jsonify({"error": "Agent is not ready."}), 503
     try:
         data = request.get_json()
-        user_input, session_id = data.get('message'), data.get('session_id', 'default_session')
+        user_input_text = data.get('message')
+        session_id = data.get('session_id', 'default_session')
+        file_data = data.get('file')
+        
+        extracted_text_content = None
+        # --- 在这里根据文件类型解码和读取文件内容 ---
+        if file_data and file_data.get('content'):
+            file_name = file_data.get('name', '')
+            file_extension = os.path.splitext(file_name)[1].lower()
+            
+            try:
+                decoded_bytes = base64.b64decode(file_data['content'])
+                
+                # 对于非纯文本格式，我们需要将其写入临时文件
+                if file_extension not in [".txt", ".md", ".py", ".json", ".html", ".css", ".csv"]:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
+                        temp_file.write(decoded_bytes)
+                        temp_file_path = temp_file.name
+                
+                loader = None
+                if file_extension == ".pdf":
+                    loader = PyPDFLoader(temp_file_path)
+                elif file_extension == ".docx":
+                    loader = Docx2txtLoader(temp_file_path)
+                elif file_extension in [".txt", ".md", ".py", ".json", ".html", ".css", ".csv"]:
+                    extracted_text_content = decoded_bytes.decode('utf-8', errors='ignore')
+                else:
+                    extracted_text_content = f"错误：不支持的文件类型 '{file_extension}'。我只能读取 .pdf, .docx, 和纯文本文件。"
+
+                if loader:
+                    print(f"Using {type(loader).__name__} for file: {file_name}")
+                    documents = await asyncio.to_thread(loader.load) # 异步执行IO密集型操作
+                    extracted_text_content = "\n\n".join([doc.page_content for doc in documents])
+                    os.unlink(temp_file_path) # 清理临时文件
+                
+                print(f"Successfully extracted text from '{file_name}'. Content length: {len(extracted_text_content)} chars.")
+
+            except Exception as e:
+                print(f"Error processing file content for file '{file_name}': {e}")
+                extracted_text_content = f"错误：处理文件 '{file_name}' 时发生异常: {e}"
+        
+        additional_context = {}
+        if file_data:
+            additional_context['file'] = {
+                "name": file_data.get('name'),
+                "content": file_data.get('content'), # Base64 content for tools
+                "text_content": extracted_text_content # Decoded text for LLM
+            }
+
         current_state = get_session_state(session_id)
-        current_state['messages'].append(HumanMessage(content=user_input))
+        # 1. 'content' 只包含用户的纯文本输入
+        # 2. 所有附加信息都放入 'additional_kwargs'
+        current_state['messages'].append(
+            HumanMessage(content=user_input_text, additional_kwargs=additional_context)
+        )
+        
         final_state = await core_agent_app.ainvoke(current_state, {"recursion_limit": 10})
         save_session_state(session_id, final_state)
         return jsonify({"response": final_state['messages'][-1].content})
+        
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": f"An error occurred: {e}"}), 500
+    
 
 @app.route('/listen')
 def listen():
