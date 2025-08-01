@@ -4,16 +4,25 @@ langchain
 langchain-google-genai
 langgraph
 langchain-mcp-adapters
+flask[async] #flask
 langchain-community
-flask
 uvicorn
 gunicorn
 gradio
 pillow
 requests
 hypercorn
+pygetwindow
+pynput 
+opencv-python
+numpy
+pywin32
+torch
+torchvision
+
 mcp[cli]
 python-pptx
 fonttools
 pypdf
 docx2txt
+

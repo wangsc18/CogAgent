@@ -13,6 +13,9 @@ from functools import partial
 from flask import Flask, render_template, request, jsonify, Response
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, SystemMessage, ToolMessage
+
+from utils.activity_monitor import monitor
+from utils.face_thread import visual_detector
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 
 # --- 路径和模块导入 ---
@@ -54,6 +57,8 @@ def dict_to_message(data: dict) -> BaseMessage:
 def initialize_system():
     global core_agent_app
     print("--- System Initializing ---")
+    monitor.start() # 键鼠进程
+    visual_detector.start() # 视觉线程
     if not os.path.exists(SESSIONS_DIR):
         os.makedirs(SESSIONS_DIR)
     setup_logging()
@@ -241,3 +246,7 @@ async def request_assistance():
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": f"An error occurred: {e}"}), 500
+    
+# --- 程序退出时停止后台监听器 ---
+import atexit
+atexit.register(monitor.stop)
