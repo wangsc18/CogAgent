@@ -11,6 +11,7 @@ from functools import partial
 from flask import Flask, render_template, request, jsonify, Response
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, SystemMessage, ToolMessage
+from utils.activity_monitor import monitor
 
 # --- 路径和模块导入 ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -51,6 +52,7 @@ def dict_to_message(data: dict) -> BaseMessage:
 def initialize_system():
     global core_agent_app
     print("--- System Initializing ---")
+    monitor.start()
     if not os.path.exists(SESSIONS_DIR):
         os.makedirs(SESSIONS_DIR)
     setup_logging()
@@ -186,3 +188,7 @@ async def request_assistance():
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": f"An error occurred: {e}"}), 500
+    
+# --- 程序退出时停止后台监听器 ---
+import atexit
+atexit.register(monitor.stop)

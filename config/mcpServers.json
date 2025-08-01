@@ -1,37 +1,37 @@
-{
-  "mcpServers": {
+// {
+//   "mcpServers": {
 
-    "mcp-server-chart": {
-      "command": "cmd",
-      "args": [
-        "/c",
-        "npx",
-        "-y",
-        "@antv/mcp-server-chart"
-      ]
-    },
+//     "mcp-server-chart": {
+//       "command": "cmd",
+//       "args": [
+//         "/c",
+//         "npx",
+//         "-y",
+//         "@antv/mcp-server-chart"
+//       ]
+//     },
     
-    "filesystem_server": {
-      "transport": "stdio",
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "E:\\人机交互\\CHI2026\\CogAgent\\AgentCode2.0"
-      ]
-    },
+//     "filesystem_server": {
+//       "transport": "stdio",
+//       "command": "npx",
+//       "args": [
+//         "-y",
+//         "@modelcontextprotocol/server-filesystem",
+//         "E:\\人机交互\\CHI2026\\CogAgent\\AgentCode2.0"
+//       ]
+//     },
 
-    "github_server": {
-      "transport": "stdio",
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-github"
-      ],
-      "env": {
-        "GITHUB_TOKEN": "$GITHUB_TOKEN"
-      }
-    }
+//     "github_server": {
+//       "transport": "stdio",
+//       "command": "npx",
+//       "args": [
+//         "-y",
+//         "@modelcontextprotocol/server-github"
+//       ],
+//       "env": {
+//         "GITHUB_TOKEN": "$GITHUB_TOKEN"
+//       }
+//     }
     
-  }
-}
+//   }
+// }

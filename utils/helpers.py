@@ -6,8 +6,10 @@ import random
 import logging
 import base64
 from PIL import ImageGrab
+from utils.activity_monitor import monitor
 
 def setup_logging():
+    os.makedirs('memory', exist_ok=True)  # 自动创建memory目录
     """配置日志记录到文件和控制台。"""
     logging.basicConfig(
         level=logging.INFO,
@@ -63,33 +65,39 @@ def take_screenshot() -> str:
 def get_real_time_user_activity() -> dict:
     """模拟实时监测用户活动，数据带有一定随机性。"""
     logging.info("[模拟] 正在监测用户活动...")
+    data = monitor.get_latest_data()
+    # # 随机生成应用数量、键盘和鼠标频率
+    # open_apps_count = random.randint(8, 15)
+    # keyboard_freq_hz = round(random.uniform(3.0, 8.0), 1)
+    # mouse_freq_hz = round(random.uniform(1.0, 4.0), 1)
 
-    # 随机生成应用数量、键盘和鼠标频率
-    open_apps_count = random.randint(8, 15)
-    keyboard_freq_hz = round(random.uniform(3.0, 8.0), 1)
-    mouse_freq_hz = round(random.uniform(1.0, 4.0), 1)
+    # # 随机选择窗口标题
+    # all_titles = [
+    #     "main.py - CogAgent - Visual Studio Code",
+    #     "Terminal - pwsh.exe - Visual Studio Code",
+    #     "Google Chrome - LangChain AgentState Documentation",
+    #     "WeChat",
+    #     "File Explorer - C:\\Users\\...",
+    #     "Spotify - Now Playing",
+    #     "PowerPoint - 会议汇报.pptx",
+    #     "Word - 论文.docx",
+    #     "Outlook - 邮箱",
+    #     "QQ",
+    #     "Notepad++ - notes.txt"
+    # ]
+    # window_titles = random.sample(all_titles, k=random.randint(3, 6))
 
-    # 随机选择窗口标题
-    all_titles = [
-        "main.py - CogAgent - Visual Studio Code",
-        "Terminal - pwsh.exe - Visual Studio Code",
-        "Google Chrome - LangChain AgentState Documentation",
-        "WeChat",
-        "File Explorer - C:\\Users\\...",
-        "Spotify - Now Playing",
-        "PowerPoint - 会议汇报.pptx",
-        "Word - 论文.docx",
-        "Outlook - 邮箱",
-        "QQ",
-        "Notepad++ - notes.txt"
-    ]
-    window_titles = random.sample(all_titles, k=random.randint(3, 6))
-
+    # activity = {
+    #     "open_apps_count": open_apps_count,
+    #     "keyboard_freq_hz": keyboard_freq_hz,
+    #     "mouse_freq_hz": mouse_freq_hz,
+    #     "window_titles": window_titles
+    # }
     activity = {
-        "open_apps_count": open_apps_count,
-        "keyboard_freq_hz": keyboard_freq_hz,
-        "mouse_freq_hz": mouse_freq_hz,
-        "window_titles": window_titles
+        "open_apps_count": data["open_apps_count"],
+        "keyboard_freq_hz": data["keyboard_freq_hz"],
+        "mouse_freq_hz": data["mouse_freq_hz"],
+        "window_titles": data["window_titles"]
     }
     log_message_str = (
         f"活动数据: "
