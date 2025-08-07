@@ -31,7 +31,10 @@ def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache):
                     "keyboard_hz": current_activity.get("keyboard_freq_hz", 0),
                     "mouse_hz": current_activity.get("mouse_freq_hz", 0),
                     "open_apps": current_activity.get("open_apps_count", 0),
-                    "active_app": current_activity.get("current_active_app", "N/A")
+                    "active_app": current_activity.get("current_active_app", "N/A"),
+                    # 视觉认知负荷状态
+                    "cognitive_load": current_activity.get("cognitive_load", "waiting..."),
+                    "confidence": current_activity.get("confidence", 0.0)
                 }
 
             # --- 3. 将这份实时数据推送到前端队列，用于更新图表 ---
@@ -41,7 +44,10 @@ def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache):
                     "timestamp": time.strftime("%H:%M:%S"),
                     "apps": current_activity.get("open_apps_count", 0),
                     "keyboard": current_activity.get("keyboard_freq_hz", 0),
-                    "mouse": current_activity.get("mouse_freq_hz", 0)
+                    "mouse": current_activity.get("mouse_freq_hz", 0),
+                    # 视觉认知负荷状态
+                    "cognitive_load": current_activity.get("cognitive_load", "waiting..."),
+                    "confidence": current_activity.get("confidence", 0.0),
                 }
             }
             msg_queue.put(state_update_payload)
