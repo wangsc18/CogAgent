@@ -19,7 +19,8 @@ numpy
 pywin32
 torch
 torchvision
-
+keyboard
+mouse
 mcp[cli]
 python-pptx
 fonttools

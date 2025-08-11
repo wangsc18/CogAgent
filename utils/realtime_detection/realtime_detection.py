@@ -26,6 +26,8 @@ else:
 import win32gui
 import win32con
 import win32api
+import keyboard
+import mouse
 
 class InputMonitor:
     """统计鼠标和键盘输入次数"""
@@ -45,15 +47,14 @@ class InputMonitor:
         self.running = False
 
     def _monitor(self):
-        import keyboard
-        import mouse
         mouse.hook(lambda e: self._on_mouse(e))
         keyboard.hook(lambda e: self._on_key(e))
         while self.running:
             time.sleep(0.1)
 
     def _on_mouse(self, event):
-        if event.event_type == 'down':
+    # 只处理有 event_type 属性的事件（即 ButtonEvent）
+        if hasattr(event, 'event_type') and event.event_type == 'down':
             self.mouse_clicks += 1
 
     def _on_key(self, event):
@@ -69,8 +70,8 @@ def get_active_window_info():
 
 class RealtimeCognitiveLoadDetector:
     def __init__(self, model_path, face_detector_path='utils/realtime_detection/models/face_detector', 
-                 segment_seconds=30, sample_frames=32, frame_size=112):
-        self.segment_seconds = segment_seconds
+                 segment_seconds=30, sample_frames=32, frame_size=112, predict_interval=30):
+        self.predict_interval = predict_interval
         self.sample_frames = sample_frames
         self.frame_size = frame_size
         self.fps = 25  # 假设摄像头25fps
@@ -98,6 +99,8 @@ class RealtimeCognitiveLoadDetector:
         
         # 标签映射
         self.label_names = {0: 'Low Load', 1: 'Medium Load', 2: 'High Load'}
+
+        print("实时认知负荷检测初始化完成")
         
     def load_face_detector(self, face_detector_path):
         """加载OpenCV DNN人脸检测模型"""
@@ -180,7 +183,7 @@ class RealtimeCognitiveLoadDetector:
     
     def run_detection(self):
         """运行实时检测"""
-        cap = cv2.VideoCapture(0)  # 打开摄像头
+        cap = cv2.VideoCapture(1)  # 打开摄像头
         
         if not cap.isOpened():
             print("无法打开摄像头")
@@ -188,7 +191,9 @@ class RealtimeCognitiveLoadDetector:
         
         print("实时认知负荷检测已启动")
         print("按 'q' 键退出")
-        
+
+        self.input_monitor.start()  # 启动输入监控
+
         last_prediction_time = 0
         current_load = "Waiting for data..."
         current_confidence = 0.0
@@ -203,21 +208,20 @@ class RealtimeCognitiveLoadDetector:
                 # 添加帧到缓存
                 self.frame_buffer.append(frame.copy())
                 
-                # 每30秒进行一次预测
+                # 每5秒进行一次预测
                 current_time = time.time()
                 if (len(self.frame_buffer) >= self.frames_per_segment and 
-                    current_time - last_prediction_time >= self.segment_seconds):
+                    current_time - last_prediction_time >= self.predict_interval):
                     
-                    # 预处理帧
-                    frames_tensor = self.preprocess_frames(list(self.frame_buffer))
+                    # 取最近的 frames_per_segment 帧
+                    frames_tensor = self.preprocess_frames(list(self.frame_buffer)[-self.frames_per_segment:])
                     if frames_tensor is not None:
-                        # 预测
                         predicted_class, confidence = self.predict_cognitive_load(frames_tensor)
                         current_load = self.label_names[predicted_class]
                         current_confidence = confidence
                         last_prediction_time = current_time
-                        
-                        print(f"检测结果: {current_load} (置信度: {confidence:.3f})")
+
+                        # print(f"检测结果: {current_load} (置信度: {confidence:.3f})")
                         # 获取活跃窗口信息
                         window_info = get_active_window_info()
                         # 获取输入统计
@@ -233,11 +237,10 @@ class RealtimeCognitiveLoadDetector:
                             "key_presses": key_presses,
                             "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
                         }
-                        print("结构化认知负荷与环境描述：", result)
+                        # print("结构化认知负荷与环境描述：", result)
 
-                        yield result  # 返回结果
+                        yield result
 
-                        # 重置输入统计
                         self.input_monitor.reset()
                 
                 # 在画面上显示结果
@@ -272,10 +275,11 @@ if __name__ == "__main__":
     import os
     
     # 检查模型文件
-    model_path = 'best_resnet3d.pth'
+    model_path = 'utils/realtime_detection/best_resnet3d.pth'
     if not os.path.exists(model_path):
         print(f"错误：模型文件 {model_path} 不存在")
         print("请先训练模型并保存为 best_resnet3d.pth")
     else:
         detector = RealtimeCognitiveLoadDetector(model_path)
-        detector.run_detection() 
+        for _ in detector.run_detection():
+            pass
