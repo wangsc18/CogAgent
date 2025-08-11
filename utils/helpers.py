@@ -75,7 +75,7 @@ def get_visual_cognitive_load():
 
 def get_real_time_user_activity() -> dict:
     """模拟实时监测用户活动，数据带有一定随机性。"""
-    logging.info("[模拟] 正在监测用户活动...")
+    # logging.info("正在监测用户活动...")
     # 键鼠数据
     data = monitor.get_latest_data()
     # 视觉数据
@@ -122,13 +122,13 @@ def get_real_time_user_activity() -> dict:
             "confidence": confidence
         }
     
-    log_message_str = (
-        f"活动数据: "
-        f"{activity['open_apps_count']}个应用, "
-        f"键盘频率 {activity['keyboard_freq_hz']}Hz, "
-        f"鼠标频率 {activity['mouse_freq_hz']}Hz, "
-        f"认知负荷: {activity['cognitive_load']} (置信度: {activity['confidence']:.2f})"
-    )
-    logging.info(f"[模拟] {log_message_str}")
+    # log_message_str = (
+    #     f"活动数据: "
+    #     f"{activity['open_apps_count']}个应用, "
+    #     f"键盘频率 {activity['keyboard_freq_hz']}Hz, "
+    #     f"鼠标频率 {activity['mouse_freq_hz']}Hz, "
+    #     f"认知负荷: {activity['cognitive_load']} (置信度: {activity['confidence']:.2f})"
+    # )
+    # logging.info(f"{log_message_str}")
 
     return activity
