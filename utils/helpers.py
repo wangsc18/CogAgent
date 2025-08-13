@@ -46,14 +46,14 @@ def load_user_habits() -> dict:
     return {}
 
 def take_screenshot() -> str:
-    """截取当前桌面并返回Base64编码的字符串（去掉右侧750px）。"""
+    """截取当前桌面并返回Base64编码的字符串（去掉右侧1000px）。"""
     logging.info("[截图] 正在截取当前桌面...")
     try:
         path = "desktop_screenshot.png"
         screenshot = ImageGrab.grab()
         width, height = screenshot.size
-        # 裁剪：保留左侧 width-750 区域
-        crop_width = max(width - 750, 1)
+        # 裁剪：保留左侧 width-1000 区域
+        crop_width = max(width - 1000, 1)
         cropped = screenshot.crop((0, 0, crop_width, height))
         cropped.save(path)
         logging.info(f"[截图] 截图已保存到 {path}")
@@ -74,7 +74,7 @@ def get_visual_cognitive_load():
         }
 
 def get_real_time_user_activity() -> dict:
-    """模拟实时监测用户活动，数据带有一定随机性。"""
+    """实时监测用户活动。"""
     # logging.info("正在监测用户活动...")
     # 键鼠数据
     data = monitor.get_latest_data()

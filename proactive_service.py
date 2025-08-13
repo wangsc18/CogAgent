@@ -31,7 +31,7 @@ def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache):
                     "keyboard_hz": current_activity.get("keyboard_freq_hz", 0),
                     "mouse_hz": current_activity.get("mouse_freq_hz", 0),
                     "open_apps": current_activity.get("open_apps_count", 0),
-                    "active_app": current_activity.get("current_active_app", "N/A"),
+                    "window_titles": current_activity.get("window_titles", "N/A"),
                     # 视觉认知负荷状态
                     "cognitive_load": current_activity.get("cognitive_load", "waiting..."),
                     "confidence": current_activity.get("confidence", 0.0)

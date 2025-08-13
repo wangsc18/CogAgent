@@ -46,6 +46,14 @@
         /* "新建对话" 按钮样式 */
         #new-chat-button { position: absolute; top: 15px; left: 20px; z-index: 10; padding: 8px 15px; font-size: 14px; font-weight: bold; color: #007bff; background-color: white; border: 1px solid #dee2e6; border-radius: 20px; cursor: pointer; transition: all 0.2s ease-in-out; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         #new-chat-button:hover { background-color: #007bff; color: white; border-color: #007bff; }
+
+         /* 为聊天气泡中的图片预览添加样式 */
+        .message-bubble img {
+            max-width: 100%;
+            border-radius: 10px;
+            margin-top: 8px;
+        }
+
     </style>
 </head>
 <body>
@@ -130,7 +138,7 @@
             function escapeHtml(text) { const div = document.createElement("div"); div.textContent = text; return div.innerHTML; }
             function textToHtml(text) { return escapeHtml(String(text)).replace(/\n/g, "<br>"); }
             function adjustTextareaHeight() { if (!commandInput) return; commandInput.style.height = "auto"; const maxHeight = parseFloat(getComputedStyle(commandInput).lineHeight) * 4; commandInput.style.height = Math.min(commandInput.scrollHeight, maxHeight) + "px"; commandInput.style.overflowY = (commandInput.scrollHeight > maxHeight) ? "auto" : "hidden"; }
-            function appendMessage(sender, text) {
+            function appendMessage(sender, text, imageUrl = null) {
                 const senderClass = sender === "You" ? "user" : (sender.startsWith("Agent") ? "alita" : "system");
                 const messageRow = document.createElement("div");
                 messageRow.classList.add("message-row", senderClass + "-row");
@@ -139,9 +147,21 @@
                 const senderStrong = document.createElement("strong");
                 senderStrong.textContent = sender + ": ";
                 messageBubble.appendChild(senderStrong);
-                const contentSpan = document.createElement("span");
-                contentSpan.innerHTML = textToHtml(text);
-                messageBubble.appendChild(contentSpan);
+                
+                // 如果有文本，则添加文本
+                if (text) {
+                    const contentSpan = document.createElement("span");
+                    contentSpan.innerHTML = textToHtml(text);
+                    messageBubble.appendChild(contentSpan);
+                }
+
+                // 【新增】如果有关联的图片URL，则创建并添加一个图片预览
+                if (imageUrl) {
+                    const imgPreview = document.createElement("img");
+                    imgPreview.src = imageUrl;
+                    messageBubble.appendChild(imgPreview);
+                }
+
                 messageRow.appendChild(messageBubble);
                 conversationLog.appendChild(messageRow);
                 conversationLog.scrollTop = conversationLog.scrollHeight;
@@ -202,9 +222,9 @@
 
             function updateCognitiveLoadChart(dataPoint) {
                 let loadValue = 0; // 默认为“低”
-                if (dataPoint.cognitive_load === 'medium_load') {
+                if (dataPoint.cognitive_load === 'Medium Load') {
                     loadValue = 1;
-                } else if (dataPoint.cognitive_load === 'high_load') {
+                } else if (dataPoint.cognitive_load === 'High Load') {
                     loadValue = 2;
                 }
                 lineChartData.labels.push(dataPoint.timestamp);
@@ -256,41 +276,79 @@
 
             fileInput.addEventListener("change", function(event) {
                 const file = event.target.files[0];
-                if (!file) {
-                    attachedFile = null;
-                    fileUploadStatus.textContent = "";
-                    return;
-                }
+                if (!file) return;
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     attachedFile = {
                         name: file.name,
-                        content: e.target.result.split(',')[1] // 获取 Base64 部分
+                        content: e.target.result.split(',')[1],
+                        type: "document" // 标记为文档类型
                     };
                     fileUploadStatus.textContent = `已附加: ${file.name}`;
-                    console.log("File attached:", attachedFile.name);
                 };
-                reader.onerror = function(e) {
-                    console.error("File reading error:", e);
+                reader.onerror = function() {
                     fileUploadStatus.textContent = "读取文件出错";
                     attachedFile = null;
                 };
                 reader.readAsDataURL(file);
             });
 
+            // --- 监听输入框的粘贴事件 ---
+            commandInput.addEventListener("paste", function(event) {
+                // 检查剪贴板中的项目
+                const items = (event.clipboardData || window.clipboardData).items;
+                for (let i = 0; i < items.length; i++) {
+                    // 如果项目是文件且类型是图片
+                    if (items[i].kind === 'file' && items[i].type.indexOf('image') !== -1) {
+                        // 阻止默认的粘贴行为 (例如，在某些浏览器中会粘贴文件路径)
+                        event.preventDefault();
+                        
+                        const file = items[i].getAsFile();
+                        const reader = new FileReader();
+                        
+                        reader.onload = function(e) {
+                            // 将图片数据存储为 Base64，并准备发送
+                            attachedFile = {
+                                name: "Pasted Image.png", // 给它一个通用的名字
+                                content: e.target.result.split(',')[1],
+                                type: "image", // 添加一个类型提示
+                                previewUrl: e.target.result // 完整的 Data URL 用于预览
+                            };
+                            
+                            // 显示状态，并清空输入框，准备发送
+                            fileUploadStatus.textContent = `已附加粘贴的图片。`;
+                            commandInput.value = ""; // 清空文本，因为图片是主要内容
+                            console.log("Image pasted and attached.");
+                        };
+                        reader.readAsDataURL(file);
+                        
+                        // 只处理第一张图片
+                        return;
+                    }
+                }
+            });
+
             // --- 核心功能：发送用户输入的消息 ---
             async function sendMessage() {
                 const userInput = commandInput.value.trim();
+                // 只有当有文本或有附件时才发送
                 if (userInput === "" && !attachedFile) return;
 
-                appendMessage("You", userInput + (attachedFile ? ` (文件: ${attachedFile.name})` : ""));
+                // 【修改】在显示消息时，检查是否有图片预览URL
+                appendMessage("You", userInput, attachedFile ? attachedFile.previewUrl : null);
                 
                 const payload = {
                     message: userInput,
                     session_id: sessionId
                 };
+                
+                // 如果有附件（无论是图片还是文件），都将其加入 payload
                 if (attachedFile) {
-                    payload.file = attachedFile;
+                    payload.file = {
+                        name: attachedFile.name,
+                        content: attachedFile.content,
+                        type: attachedFile.type || "document" // 默认为文档类型
+                    };
                 }
                 
                 commandInput.value = "";
@@ -309,14 +367,14 @@
                 } catch (error) {
                     appendMessage("System Error", error.message);
                 } finally {
+                    // 【修改】发送后，清空附件状态
                     attachedFile = null;
-                    fileInput.value = "";
+                    fileInput.value = ""; 
                     fileUploadStatus.textContent = "";
                     sendButton.disabled = false;
                     commandInput.focus();
                 }
             }
-
             // --- 核心功能：处理用户对主动服务的确认 ---
             confirmYesBtn.addEventListener("click", async function() {
                 if (inquiryTimeoutId) clearTimeout(inquiryTimeoutId); // 清除计时器
