@@ -2,10 +2,14 @@
 import json
 from datetime import datetime
 from utils.helpers import take_screenshot, log_message
+from langchain_core.messages import HumanMessage
+from langchain_core.language_models import BaseLanguageModel
+from typing import Dict, Any
 
 class UserStateModeler:
     """
     用户建模器，使用一个加权分数模型来判断是否需要主动服务。
+    同时作为一个“分析器Agent”，能够在用户确认后分析其意图并提出建议。
     """
     def __init__(self, observation_period_seconds=30, history_limit=6):
         self.history = []
@@ -127,6 +131,77 @@ class UserStateModeler:
                 "activity_log": history_to_return
             }
         }
+
+    @staticmethod
+    async def analyze_user_context_and_suggest(
+        context: Dict[str, Any],
+        llm: BaseLanguageModel,
+        tools_config: Dict[str, Any]
+    ) -> Dict[str, str]:
+        """
+        【新增】这是分析器Agent的核心。
+        它接收用户确认后的上下文，并调用LLM来分析意图和建议行动。
+        """
+        log_message("--- Analyzer Agent Started ---")
+        summary = context.get("activity_summary", {})
+        reason = context.get("reason", "注意到用户似乎很忙。")
+        screenshot_b64 = take_screenshot()
+
+        analyzer_prompt_text = f"""
+你是一个专业的“情境分析与任务建议”AI。你的唯一目标是分析用户的当前状态和屏幕截图，然后从一个给定的工具列表中，建议一个最能帮助用户、降低其认知负荷的具体行动。
+
+# 你的分析依据:
+1.  **系统分析报告**: {reason}
+2.  **用户活动数据**:
+    - 主动服务综合评分: {summary.get('proactive_score', 'N/A')}
+    - 最终认知状态判断: {summary.get('final_cognitive_load', 'N/A')} (置信度: {summary.get('final_confidence', 0.0):.0%})
+    - 平均键盘/鼠标活动: {summary.get('avg_keyboard_hz', 'N/A')} Hz / {summary.get('avg_mouse_hz', 'N/A')} Hz
+    - 窗口变化数: {summary.get('changed_windows_count', 'N/A')}
+3.  **用户的屏幕截图**: 附在下面的图片中，展示了用户正在进行的具体工作。
+4.  **可用的工具集**:
+    ```json
+    {json.dumps(tools_config, indent=2, ensure_ascii=False)}
+    ```
+# 你的任务:
+仔细观察屏幕截图，并结合所有文字信息，回答以下问题：
+1.  这个用户最有可能在做什么？（例如：正在编写Python代码、阅读一篇长篇PDF报告、调试一个Web应用...）
+2.  根据用户的任务，哪一个“可用工具”能够最直接地帮助他/她？
+3.  你应该如何向用户提出这个建议？
+
+# 输出格式:
+请严格按照以下JSON格式返回你的分析结果，不要包含任何其他解释性文字。
+{{
+  "user_intent": "一个对用户正在做的事情的简短描述。",
+  "suggestion_text": "一句具体、友好的话，告诉用户你可以如何帮助他。例如：'看起来您正在阅读一份很长的PDF，需要我帮您总结一下要点吗？'",
+  "recommended_tool": "从工具列表中选择的最合适的工具的名称，例如 'summarize_document'。",
+  "reasoning": "解释为什么你推荐这个工具的简短理由。"
+}}
+"""
+        multimodal_content = [
+            {"type": "text", "text": analyzer_prompt_text},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{screenshot_b64}"}}
+        ]
+        
+        # 将多模态内容包装在HumanMessage中，然后传递给LLM
+        analyzer_message = HumanMessage(content=multimodal_content)
+        
+        try:
+            log_message("Analyzer Agent invoking LLM...")
+            response = await llm.ainvoke([analyzer_message])
+            response_content = response.content.strip().lstrip("```json").rstrip("```").strip()
+            log_message(f"Analyzer Agent LLM Raw Response: {response_content}")
+            
+            parsed_response = json.loads(response_content)
+            return parsed_response
+
+        except Exception as e:
+            log_message(f"Analyzer Agent failed: {e}")
+            return {
+                "user_intent": "分析失败",
+                "suggestion_text": "抱歉，我在分析您的情况时遇到了一个内部错误。",
+                "recommended_tool": None,
+                "reasoning": str(e)
+            }
 
     @staticmethod
     def format_prompt_after_confirmation(context: dict) -> list:
