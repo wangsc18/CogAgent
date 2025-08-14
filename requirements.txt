@@ -4,7 +4,7 @@ langchain
 langchain-google-genai
 langgraph
 langchain-mcp-adapters
-flask[async] #flask
+quart
 langchain-community
 uvicorn
 gunicorn

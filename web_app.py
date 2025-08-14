@@ -3,14 +3,13 @@ import os
 import sys
 import json
 import uuid
-import queue
 import base64
 import asyncio
 import tempfile
 import threading
 import traceback
 from functools import partial
-from flask import Flask, render_template, request, jsonify, Response
+from quart import Quart, render_template, request, jsonify, Response
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, SystemMessage, ToolMessage
 
@@ -34,9 +33,12 @@ from utils.mcp_config_loader import load_mcp_servers_config
 from utils.helpers import setup_logging, load_user_habits
 
 # --- 全局变量 ---
+llm = None  # <--- 将llm设为全局变量
+tools_config = {} # <--- 将tools_config设为全局变量
+executable_tools = {} # <--- 将executable_tools设为全局变量
 core_agent_app = None
 SESSIONS = {}
-message_queue = queue.Queue()
+message_queue = asyncio.Queue()
 pending_assistance_requests = {}
 SESSIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions")
 
@@ -55,7 +57,7 @@ def dict_to_message(data: dict) -> BaseMessage:
 
 # --- 初始化函数 ---
 def initialize_system():
-    global core_agent_app
+    global core_agent_app, llm, tools_config, executable_tools
     print("--- System Initializing ---")
     monitor.start() # 键鼠进程
     visual_detector.start() # 视觉线程
@@ -75,10 +77,10 @@ def initialize_system():
     discovered_tools = loop.run_until_complete(mcp_client.get_tools())
     print(f"Discovered {len(discovered_tools)} tools.")
     tools_config = {tool.name: {"description": tool.description, "args_schema": tool.args_schema} for tool in discovered_tools}
-    # for tool in discovered_tools:
-    #     print(tool)
     executable_tools = {tool.name: tool for tool in discovered_tools}
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro")
+
+    llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+
     user_habits = load_user_habits()
     workflow = StateGraph(AgentState)
     planner_node = partial(run_planner, llm=llm, tools_config=tools_config, user_habits=user_habits)
@@ -97,21 +99,30 @@ def initialize_system():
     print("--- Core Dialogue Agent Initialized Successfully ---")
 
 # --- 会话状态函数 ---
-def get_session_state(session_id: str) -> dict:
+async def get_session_state(session_id: str) -> dict: # 1. 改为 async def
     if session_id in SESSIONS: return SESSIONS[session_id]
     session_file = os.path.join(SESSIONS_DIR, f"{session_id}.json")
+    
     if os.path.exists(session_file):
-        with open(session_file, 'r', encoding='utf-8') as f:
-            try:
-                data = json.load(f)
-                state = {
-                    "messages": [dict_to_message(msg) for msg in data.get("messages", [])],
-                    "log": data.get("log", []),
-                    "user_state": data.get("user_state", {})
-                }
-                SESSIONS[session_id] = state
-                return state
-            except (json.JSONDecodeError, TypeError): pass
+        try:
+            # 2. 将同步的IO操作放入后台线程执行
+            def _read_file():
+                with open(session_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            
+            data = await asyncio.to_thread(_read_file)
+            
+            state = {
+                "messages": [dict_to_message(msg) for msg in data.get("messages", [])],
+                "log": data.get("log", []),
+                "user_state": data.get("user_state", {})
+            }
+            SESSIONS[session_id] = state
+            return state
+        except (json.JSONDecodeError, TypeError, IOError):
+             pass # 如果读取或解析失败，则继续执行下面的逻辑来创建新状态
+
+    # 创建新会话的逻辑保持不变
     user_habits = load_user_habits()
     initial_messages = []
     if user_habits:
@@ -119,47 +130,59 @@ def get_session_state(session_id: str) -> dict:
         initial_messages.append(SystemMessage(content=habit_prompt))
     new_state = {"messages": initial_messages, "log": [], "user_state": {}}
     SESSIONS[session_id] = new_state
-    save_session_state(session_id, new_state)
+    # 第一次创建时，我们也可以异步地保存它
+    await save_session_state(session_id, new_state) 
     return new_state
 
-def save_session_state(session_id: str, state: dict):
+async def save_session_state(session_id: str, state: dict): # 1. 改为 async def
     SESSIONS[session_id] = state
     session_file = os.path.join(SESSIONS_DIR, f"{session_id}.json")
+    
     try:
         data_to_save = {
             "messages": [message_to_dict(msg) for msg in state.get("messages", [])],
             "log": state.get("log", []),
             "user_state": state.get("user_state", {})
         }
-        with open(session_file, 'w', encoding='utf-8') as f:
-            json.dump(data_to_save, f, ensure_ascii=False, indent=2)
+        
+        # 2. 将同步的IO操作放入后台线程执行
+        def _write_file():
+            with open(session_file, 'w', encoding='utf-8') as f:
+                json.dump(data_to_save, f, ensure_ascii=False, indent=2)
+
+        await asyncio.to_thread(_write_file)
+
     except Exception as e:
         print(f"Error saving session '{session_id}' to file: {e}")
 
 # --- 在全局作用域执行初始化和后台线程启动 ---
 initialize_system()
-app = Flask(__name__)
-proactive_thread = threading.Thread(
-    target=proactive_monitoring_loop, 
-    args=(SESSIONS, message_queue, pending_assistance_requests),
-    daemon=True
-)
-proactive_thread.start()
+app = Quart(__name__)
 
+@app.before_serving
+async def startup_background_tasks():
+    print("--- Starting background tasks ---")
+    app.add_background_task(
+        proactive_monitoring_loop,
+        sessions_dict=SESSIONS,
+        msg_queue=message_queue,
+        request_cache=pending_assistance_requests
+    )
+    
 # --- 路由定义 ---
 @app.route('/')
-def index():
-    return render_template('index.html')
+async def index():
+    return await render_template('index.html')
 
 @app.route('/chat', methods=['POST'])
 async def chat():
     try:
-        data = request.get_json()
+        data = await request.get_json()
         user_input_text = data.get('message', '') # 确保有默认值
         session_id = data.get('session_id', 'default_session')
         file_data = data.get('file')
         
-        current_state = get_session_state(session_id)
+        current_state = await get_session_state(session_id)
         
         # --- 根据附件类型决定如何构建 HumanMessage ---
         if file_data and file_data.get('type') == 'image':
@@ -217,7 +240,7 @@ async def chat():
                     "text_content": extracted_text_content # Decoded text for LLM
                 }
 
-            current_state = get_session_state(session_id)
+            current_state = await get_session_state(session_id)
             # 1. 'content' 只包含用户的纯文本输入
             # 2. 所有附加信息都放入 'additional_kwargs'
             current_state['messages'].append(
@@ -225,7 +248,7 @@ async def chat():
             )
         
         final_state = await core_agent_app.ainvoke(current_state, {"recursion_limit": 10})
-        save_session_state(session_id, final_state)
+        await save_session_state(session_id, final_state)
         return jsonify({"response": final_state['messages'][-1].content})
         
     except Exception as e:
@@ -234,28 +257,58 @@ async def chat():
     
 
 @app.route('/listen')
-def listen():
-    def event_stream():
+async def listen():
+    async def event_stream():
         while True:
-            message = message_queue.get()
-            yield f"data: {json.dumps(message)}\n\n"
+            try:
+                message = await message_queue.get()
+                yield f"data: {json.dumps(message)}\n\n"
+            except asyncio.CancelledError:
+                break
     return Response(event_stream(), mimetype="text/event-stream")
 
 @app.route('/request_assistance', methods=['POST'])
 async def request_assistance():
     if not core_agent_app: return jsonify({"error": "Agent is not ready."}), 503
     try:
-        data = request.get_json()
+        data = await request.get_json()
         request_id, session_id = data.get("request_id"), data.get("session_id")
         if not session_id: return jsonify({"error": "No active session ID provided."}), 400
         context_to_process = pending_assistance_requests.pop(request_id, None)
         if not context_to_process: return jsonify({"error": "Invalid or expired assistance request."}), 404
-        prompt_content = UserStateModeler.format_prompt_after_confirmation(context_to_process)
-        state = get_session_state(session_id)
-        state['messages'].append(HumanMessage(content=prompt_content))
+
+        # 1. 调用 Analyzer Agent 进行分析
+        analysis_result = await UserStateModeler.analyze_user_context_and_suggest(
+            context=context_to_process,
+            llm=llm, # 使用全局的、支持视觉的LLM
+            tools_config=tools_config # 传递可用的工具
+        )
+
+        if not analysis_result.get("recommended_tool"):
+            # 如果分析失败或没有建议，直接返回错误信息
+            return jsonify({"response": analysis_result.get("suggestion_text", "分析失败，无法提供建议。")})
+        
+        # 2. 基于分析结果，构建一个清晰的 "Handoff" 消息给主Agent
+        handoff_prompt = f"""
+我刚刚确认需要帮助。我的主动式助理分析了我的情况，并给出了以下建议：
+
+- **它认为我正在做**: {analysis_result['user_intent']}
+- **它建议的操作**: {analysis_result['suggestion_text']}
+- **它建议使用的工具**: `{analysis_result['recommended_tool']}`
+- **理由**: {analysis_result['reasoning']}
+
+请根据这个建议继续操作。如果这是一个工具调用，请直接准备并执行它。
+"""
+
+        # 3. 将这个 Handoff 消息作为用户的最新输入，送入主工作流
+        state = await get_session_state(session_id)
+        state['messages'].append(HumanMessage(content=handoff_prompt))
+        
         final_state = await core_agent_app.ainvoke(state, {"recursion_limit": 10})
-        save_session_state(session_id, final_state)
+        await save_session_state(session_id, final_state)
+
         return jsonify({"response": final_state['messages'][-1].content})
+
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": f"An error occurred: {e}"}), 500
