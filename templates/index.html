@@ -20,11 +20,11 @@
         .conversation-log { flex-grow: 1; overflow-y: auto; padding: 20px; }
         .message-row { display: flex; margin-bottom: 12px; }
         .user-row { justify-content: flex-end; }
-        .alita-row, .system-row { justify-content: flex-start; }
+        .reactive_agent-row, .proactive_agent-row { justify-content: flex-start; }
         .message-bubble { max-width: 70%; padding: 10px 15px; border-radius: 18px; line-height: 1.5; word-wrap: break-word; }
         .user-bubble { background-color: #007bff; color: white; border-bottom-right-radius: 4px; }
-        .alita-bubble { background-color: #f1f0f0; color: black; border-bottom-left-radius: 4px; }
-        .system-bubble { background-color: #fffbe6; color: #8a6d3b; border: 1px solid #ffeeba; font-size: 14px; }
+        .reactive_agent-bubble { background-color: #f1f0f0; color: black; border-bottom-left-radius: 4px; }
+        .proactive_agent-bubble { background-color: #fffbe6; color: #8a6d3b; border: 1px solid #ffeeba; font-size: 14px; }
         
         /* 输入区域，包含文件上传 */
         .input-area-container { padding: 15px 20px; border-top: 1px solid #e0e0e0; background-color: white; }
@@ -52,6 +52,15 @@
             max-width: 100%;
             border-radius: 10px;
             margin-top: 8px;
+        }
+
+        /* 附加文件的样式 */
+        .attachment-info {
+            color: #d7d7d7 !important; /* 灰色字体显示 */
+            font-style: italic;
+            font-size: 0.9em; /* 比正文小一点 */
+            display: block; /* 让它换行显示，更清晰 */
+            margin-top: 5px;
         }
 
     </style>
@@ -136,26 +145,27 @@
 
             // --- 辅助函数 ---
             function escapeHtml(text) { const div = document.createElement("div"); div.textContent = text; return div.innerHTML; }
-            function textToHtml(text) { return escapeHtml(String(text)).replace(/\n/g, "<br>"); }
             function adjustTextareaHeight() { if (!commandInput) return; commandInput.style.height = "auto"; const maxHeight = parseFloat(getComputedStyle(commandInput).lineHeight) * 4; commandInput.style.height = Math.min(commandInput.scrollHeight, maxHeight) + "px"; commandInput.style.overflowY = (commandInput.scrollHeight > maxHeight) ? "auto" : "hidden"; }
-            function appendMessage(sender, text, imageUrl = null) {
-                const senderClass = sender === "You" ? "user" : (sender.startsWith("Agent") ? "alita" : "system");
+            function appendMessage(sender, htmlContent, imageUrl = null) {
+                const senderClass = sender === "You" ? "user" : (sender.startsWith("Agent (Proactive)") ? "proactive_agent" : "reactive_agent");
+                
                 const messageRow = document.createElement("div");
                 messageRow.classList.add("message-row", senderClass + "-row");
                 const messageBubble = document.createElement("div");
                 messageBubble.classList.add("message-bubble", senderClass + "-bubble");
+
                 const senderStrong = document.createElement("strong");
                 senderStrong.textContent = sender + ": ";
                 messageBubble.appendChild(senderStrong);
                 
-                // 如果有文本，则添加文本
-                if (text) {
+                // 如果有内容，则直接作为HTML插入
+                if (htmlContent) {
                     const contentSpan = document.createElement("span");
-                    contentSpan.innerHTML = textToHtml(text);
+                    contentSpan.innerHTML = htmlContent;
                     messageBubble.appendChild(contentSpan);
                 }
 
-                // 【新增】如果有关联的图片URL，则创建并添加一个图片预览
+                // 如果有关联的图片URL，则创建并添加一个图片预览
                 if (imageUrl) {
                     const imgPreview = document.createElement("img");
                     imgPreview.src = imageUrl;
@@ -334,9 +344,17 @@
                 // 只有当有文本或有附件时才发送
                 if (userInput === "" && !attachedFile) return;
 
-                // 【修改】在显示消息时，检查是否有图片预览URL
-                appendMessage("You", userInput, attachedFile ? attachedFile.previewUrl : null);
-                
+                let messageContentHtml = escapeHtml(userInput).replace(/\n/g, "<br>");
+
+                // 检查是否有附加文件（并且不是图片预览，因为图片有自己的显示方式）
+                if (attachedFile && attachedFile.type === 'document') {
+                    const fileNameHtml = escapeHtml(attachedFile.name);
+                    // 将文件信息包裹在我们刚刚定义的CSS类中
+                    messageContentHtml += `<span class="attachment-info">(已附加文件: ${fileNameHtml})</span>`;
+                }
+                // 在显示消息时，检查是否有图片预览URL
+                appendMessage("You", messageContentHtml, attachedFile ? attachedFile.previewUrl : null);
+
                 const payload = {
                     message: userInput,
                     session_id: sessionId
@@ -363,7 +381,7 @@
                     });
                     if (!response.ok) { const errorData = await response.json(); throw new Error(errorData.error || "Server error"); }
                     const data = await response.json();
-                    appendMessage("Agent", data.response);
+                    appendMessage("Agent", escapeHtml(data.response).replace(/\n/g, "<br>"));
                 } catch (error) {
                     appendMessage("System Error", error.message);
                 } finally {
@@ -382,19 +400,28 @@
 
                 if (!currentAssistanceRequestId) return;
                 confirmationBanner.classList.add("hidden");
-                appendMessage("System", "好的，正在为您分析情况...");
+                appendMessage("Agent (Proactive)", "好的，正在为您分析情况...");
                 try {
-                const response = await fetch("/request_assistance", { 
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ 
-                        request_id: currentAssistanceRequestId,
-                        session_id: sessionId // <-- 将主会话ID发回
-                    })
-                });
+                    const response = await fetch("/request_assistance", { 
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ 
+                            request_id: currentAssistanceRequestId,
+                            session_id: sessionId // <-- 将主会话ID发回
+                        })
+                    });
+
                     if (!response.ok) { const errorData = await response.json(); throw new Error(errorData.error || "Server error"); }
+                    
                     const data = await response.json();
-                    appendMessage("Agent (Proactive)", data.response);
+                    // 1. 如果有分析消息，先显示它
+                    if (data.analysis_message) {
+                        appendMessage("Agent (Proactive)", data.analysis_message);
+                    }
+                    // 2. 然后显示主动服务的响应
+                    if (data.response) {
+                        appendMessage("Agent", data.response);
+                    }
                 } catch (error) {
                     appendMessage("System Error", error.message);
                 } finally {
@@ -407,7 +434,7 @@
                 inquiryTimeoutId = null;
 
                 confirmationBanner.classList.add("hidden");
-                appendMessage("System", "好的，如果您需要帮助，可以随时向我提问。");
+                appendMessage("Agent (Proactive)", "好的，如果您需要帮助，可以随时向我提问。");
                 currentAssistanceRequestId = null;
             });
 
@@ -448,7 +475,7 @@
                             inquiryTimeoutId = setTimeout(() => {
                                 console.log("Inquiry timed out. Hiding banner.");
                                 confirmationBanner.classList.add("hidden");
-                                appendMessage("System", "系统建议已超时，自动为您关闭。");
+                                appendMessage("Agent (Proactive)", "系统建议已超时，自动为您关闭。");
                                 currentAssistanceRequestId = null; // 清理ID
                                 inquiryTimeoutId = null; // 清理计时器ID
                             }, 20000); // 20000毫秒 = 20秒

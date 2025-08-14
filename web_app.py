@@ -59,8 +59,6 @@ def dict_to_message(data: dict) -> BaseMessage:
 def initialize_system():
     global core_agent_app, llm, tools_config, executable_tools
     print("--- System Initializing ---")
-    monitor.start() # 键鼠进程
-    visual_detector.start() # 视觉线程
     if not os.path.exists(SESSIONS_DIR):
         os.makedirs(SESSIONS_DIR)
     setup_logging()
@@ -307,7 +305,10 @@ async def request_assistance():
         final_state = await core_agent_app.ainvoke(state, {"recursion_limit": 10})
         await save_session_state(session_id, final_state)
 
-        return jsonify({"response": final_state['messages'][-1].content})
+        return jsonify({
+                "analysis_message": f"系统分析完成，正在执行建议...\n\n---\n{analysis_result['suggestion_text']}\n理由: {analysis_result['reasoning']}",
+                "response": final_state['messages'][-1].content
+            })
 
     except Exception as e:
         traceback.print_exc()
