@@ -26,7 +26,7 @@
         "npx",
         "-y",
         "@modelcontextprotocol/server-filesystem",
-        "E:/人机交互/CHI2026/CogAgent"
+        "E:/wsc/CHI2026/CogAgent"
       ]
     }
     
