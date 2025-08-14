@@ -6,7 +6,7 @@ from utils.helpers import log_message
 
 MAX_FILE_CONTENT_CHARS = 12000
 
-def run_planner(state: AgentState, llm, tools_config: dict, user_habits: dict) -> AgentState:
+async def run_planner(state: AgentState, llm, tools_config: dict, user_habits: dict) -> AgentState:
     """
     核心决策节点。它能处理标准文本和多模态输入，
     并会结合用户的长期习惯和【由后台服务持续更新的实时状态】进行决策。
@@ -54,7 +54,7 @@ def run_planner(state: AgentState, llm, tools_config: dict, user_habits: dict) -
     
     # --- 3. 构建统一的“思考指令” Prompt ---
     decision_prompt_text = f"""
-你是一个能够感知用户实时状态的、有同理心的对话助手，请严格遵循“思考后行动”的范式。
+你是一个能够感知用户实时状态的、有同理心的对话助手。
 
 # 你的核心任务指令:
 1.  **分析意图**: 首先，仔细分析用户的最新请求和整个对话历史，理解用户的真实意图或问题。
@@ -96,16 +96,16 @@ def run_planner(state: AgentState, llm, tools_config: dict, user_habits: dict) -
             ]
             # 为了确保上下文完整，我们发送包含 SystemMessage 的历史 + 新的 HumanMessage
             llm_input = [msg for msg in messages[:-1] if isinstance(msg, SystemMessage)] + [HumanMessage(content=multimodal_content)]
-            response = llm.invoke(llm_input)
-            response_str = response.content
+            response = await llm.ainvoke(llm_input)
         else: # 如果列表里没有图片，按文本处理
-            response_str = llm.invoke(decision_prompt_text).content
+            response = await llm.ainvoke(decision_prompt_text)
     else:
         log_message("Planner preparing standard text input.")
         # 对于纯文本/文档，直接发送“思考指令”
-        response_str = llm.invoke(decision_prompt_text).content
-        
+        response = await llm.ainvoke(decision_prompt_text)
+
     # --- 5. 统一处理 LLM 的 JSON 输出 (逻辑不变) ---
+    response_str = response.content
     cleaned_response = response_str.strip().lstrip("```json").rstrip("```").strip()
     
     try:

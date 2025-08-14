@@ -412,40 +412,65 @@
             });
 
             // --- 核心功能：监听来自服务器的 Server-Sent Events ---
-            console.log("Connecting to SSE stream at /listen");
-            const sse = new EventSource("/listen");
-            sse.onmessage = function(event) {
-                try {
-                    const data = JSON.parse(event.data);
-                    
-                    if (data.type === 'state_update') {
-                        updateCognitiveLoadChart(data.data);
-                    } 
-                    else if (data.type === 'inquiry') {
-                        console.log("Received inquiry from server:", data);
+            let sse = null; // 将 sse 声明为可变变量
+            
+            function connectSSE() {
+                // 如果已有连接，并且状态不是CLOSED，则不重复连接
+                if (sse && sse.readyState !== EventSource.CLOSED) {
+                    console.log("SSE connection is already open.");
+                    return;
+                }
 
-                        // 1. 如果上一个询问的计时器还在，先清除它
-                        if (inquiryTimeoutId) {
-                            clearTimeout(inquiryTimeoutId);
-                        }
-
-                        // 2. 更新弹窗内容并显示
-                        confirmationText.textContent = data.text;
-                        currentAssistanceRequestId = data.request_id; 
-                        confirmationBanner.classList.remove("hidden");
+                console.log("Connecting to SSE stream at /listen ...");
+                sse = new EventSource("/listen"); // 创建新的EventSource实例
+                
+                sse.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
                         
-                        // 3. 设置一个新的20秒计时器，超时后自动隐藏弹窗
-                        inquiryTimeoutId = setTimeout(() => {
-                            console.log("Inquiry timed out. Hiding banner.");
-                            confirmationBanner.classList.add("hidden");
-                            appendMessage("System", "系统建议已超时，自动为您关闭。");
-                            currentAssistanceRequestId = null; // 清理ID
-                            inquiryTimeoutId = null; // 清理计时器ID
-                        }, 20000); // 20000毫秒 = 20秒
-                    }
-                } catch (e) { console.error("Error parsing SSE data:", e); }
-            };
-            sse.onerror = function(error) { console.error("SSE connection error:", error); sse.close(); };
+                        if (data.type === 'state_update') {
+                            updateCognitiveLoadChart(data.data);
+                        } 
+                        else if (data.type === 'inquiry') {
+                            console.log("Received inquiry from server:", data);
+
+                            // 1. 如果上一个询问的计时器还在，先清除它
+                            if (inquiryTimeoutId) {
+                                clearTimeout(inquiryTimeoutId);
+                            }
+
+                            // 2. 更新弹窗内容并显示
+                            confirmationText.textContent = data.text;
+                            currentAssistanceRequestId = data.request_id; 
+                            confirmationBanner.classList.remove("hidden");
+                            
+                            // 3. 设置一个新的20秒计时器，超时后自动隐藏弹窗
+                            inquiryTimeoutId = setTimeout(() => {
+                                console.log("Inquiry timed out. Hiding banner.");
+                                confirmationBanner.classList.add("hidden");
+                                appendMessage("System", "系统建议已超时，自动为您关闭。");
+                                currentAssistanceRequestId = null; // 清理ID
+                                inquiryTimeoutId = null; // 清理计时器ID
+                            }, 20000); // 20000毫秒 = 20秒
+                        }
+                    } catch (e) { console.error("Error parsing SSE data:", e); }
+                };
+                sse.onopen = function() {
+                    console.log("SSE connection established successfully.");
+                };
+                sse.onerror = function(error) {
+                    console.error("SSE connection error:", error); 
+                }; // 不能关闭sse，要让它自动重连
+            }
+
+            connectSSE();
+            // 每10秒检查一次SSE连接的状态，如果发现是CLOSED，就强制重新连接
+            setInterval(() => {
+                if (!sse || sse.readyState === EventSource.CLOSED) {
+                    console.warn("Watchdog detected a closed SSE connection. Forcing reconnect...");
+                    connectSSE();
+                }
+            }, 10000); // 每10秒检查一次
 
             // --- 事件绑定 ---
             sendButton.addEventListener("click", sendMessage);

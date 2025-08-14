@@ -1,14 +1,13 @@
 # proactive_service.py
 import time
-import threading
+import asyncio
 import uuid
 from agents.user_state_modeler import UserStateModeler
 from utils.helpers import get_real_time_user_activity
 
-MONITORING_INTERVAL_SECONDS = 30
 UPDATE_INTERVAL_SECONDS = 5 # 每5秒更新一次状态
 
-def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache):
+async def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache):
     """
     监控循环。核心职责：
     1. 持续更新所有活动会话的 user_state。
@@ -22,7 +21,7 @@ def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache):
     while True:
         try:
             # --- 1. 获取一次实时数据 ---
-            current_activity = get_real_time_user_activity()
+            current_activity = await asyncio.to_thread(get_real_time_user_activity)
             
             # --- 2. 更新所有后端活动会话的 user_state ---
             for session_id, session_state in list(sessions_dict.items()):
@@ -50,7 +49,7 @@ def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache):
                     "confidence": current_activity.get("confidence", 0.0),
                 }
             }
-            msg_queue.put(state_update_payload)
+            await msg_queue.put(state_update_payload)
 
             # --- 4. 将刚刚获取的数据用于主动服务决策 ---
             modeler.log_current_state_from_data(current_activity) 
@@ -62,16 +61,17 @@ def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache):
                     print(f"--- Proactive Service: Detected high load. Caching context and pushing inquiry. ---")
                     request_id = str(uuid.uuid4())
                     request_cache[request_id] = analysis_result.get("context")
-                    msg_queue.put({
+                    inquiry_payload = {
                         "type": "inquiry", 
                         "text": analysis_result["inquiry_text"],
                         "request_id": request_id
-                    })
-            
-            time.sleep(UPDATE_INTERVAL_SECONDS)
+                    }
+                    await msg_queue.put(inquiry_payload)
+
+            await asyncio.sleep(UPDATE_INTERVAL_SECONDS)
 
         except Exception as e:
             import traceback
             print(f"An error occurred in the proactive monitoring loop: {e}")
             traceback.print_exc()
-            time.sleep(MONITORING_INTERVAL_SECONDS)
+            await asyncio.sleep(UPDATE_INTERVAL_SECONDS)

@@ -1,5 +1,6 @@
 # agents/user_state_modeler.py
 import json
+import asyncio
 from datetime import datetime
 from utils.helpers import take_screenshot, log_message
 from langchain_core.messages import HumanMessage
@@ -22,7 +23,7 @@ class UserStateModeler:
             "mouse": 0.1,        # 鼠标行为占 10% 权重
             "window_switch": 0.15 # 窗口切换占 15% 权重
         }
-        self.proactive_threshold = 50 # 当总分超过 50 (满分100) 时，触发主动服务
+        self.proactive_threshold = 10 # 当总分超过 50 (满分100) 时，触发主动服务
 
     def log_current_state_from_data(self, activity: dict):
         """从外部接收活动数据并记录。"""
@@ -145,7 +146,7 @@ class UserStateModeler:
         log_message("--- Analyzer Agent Started ---")
         summary = context.get("activity_summary", {})
         reason = context.get("reason", "注意到用户似乎很忙。")
-        screenshot_b64 = take_screenshot()
+        screenshot_b64 = await asyncio.to_thread(take_screenshot)
 
         analyzer_prompt_text = f"""
 你是一个专业的“情境分析与任务建议”AI。你的唯一目标是分析用户的当前状态和屏幕截图，然后从一个给定的工具列表中，建议一个最能帮助用户、降低其认知负荷的具体行动。
@@ -202,29 +203,3 @@ class UserStateModeler:
                 "recommended_tool": None,
                 "reasoning": str(e)
             }
-
-    @staticmethod
-    def format_prompt_after_confirmation(context: dict) -> list:
-        # 这个方法现在可以更清晰地展示分数
-        summary = context.get("activity_summary", {})
-        reason = context.get("reason", "注意到用户似乎很忙。")
-        screenshot_b64 = take_screenshot()
-        
-        text_prompt = f"""
-我刚刚确认了需要帮助。
-
-**系统分析**: {reason}
-
-**附加的活动总结**:
-- **主动服务综合评分**: {summary.get('proactive_score', 'N/A')}
-- 最终认知状态判断: {summary.get('final_cognitive_load', 'N/A')} (置信度: {summary.get('final_confidence', 0.0):.0%})
-- 平均键盘速度: {summary.get('avg_keyboard_hz', 'N/A')} Hz
-- 窗口变化数: {summary.get('changed_windows_count', 'N/A')}
-
-这是我当前屏幕的截图，它展示了我正在做的事情。请结合上述的活动上下文和这张截图，综合分析我当前的情况，并提供一些具体的建议。
-"""
-        multimodal_content = [
-            {"type": "text", "text": text_prompt},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{screenshot_b64}"}}
-        ]
-        return multimodal_content
