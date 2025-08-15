@@ -28,6 +28,17 @@
         "@modelcontextprotocol/server-filesystem",
         "E:/wsc/CHI2026/CogAgent"
       ]
+    },
+
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ],
+      "env": {
+        "MEMORY_FILE_PATH": "E:/wsc/CHI2026/CogAgent/CogAgent/config/memory.json"
+      }
     }
     
   }
