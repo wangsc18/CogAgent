@@ -344,6 +344,32 @@
                 // 只有当有文本或有附件时才发送
                 if (userInput === "" && !attachedFile) return;
 
+                // 检查是否是结束会话的命令
+                const isEndCommand = userInput.toLowerCase() === 'end';
+                if (isEndCommand) {
+                    appendMessage("System", "好的，正在为您结束当前会话并保存记忆...");
+                    // 额外调用 /end_chat 端点
+                    fetch("/end_chat", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ session_id: sessionId })
+                    }).then(response => response.json()).then(data => {
+                        console.log("End chat response:", data);
+                        // 可以在这里提示用户可以点击“新建对话”了
+                        appendMessage("System", "记忆已开始后台保存。您可以点击左上角的“新建对话”按钮开始新的会话。");
+                    }).catch(error => {
+                        console.error("Error ending chat:", error);
+                        appendMessage("System Error", "结束会话时发生错误: " + error.message);
+                    });
+                    
+                    // 清理输入框并禁用发送按钮
+                    commandInput.value = "";
+                    adjustTextareaHeight();
+                    sendButton.disabled = true; // 禁用发送，因为会话已结束
+                    return; // 结束函数，不再执行后续的 /chat 调用
+                    // 似乎没有起到作用？
+                }
+
                 let messageContentHtml = escapeHtml(userInput).replace(/\n/g, "<br>");
 
                 // 检查是否有附加文件（并且不是图片预览，因为图片有自己的显示方式）
@@ -400,6 +426,8 @@
 
                 if (!currentAssistanceRequestId) return;
                 confirmationBanner.classList.add("hidden");
+
+                appendMessage("You", "是的，请帮助我。");
                 appendMessage("Agent (Proactive)", "好的，正在为您分析情况...");
                 try {
                     const response = await fetch("/request_assistance", { 
@@ -434,6 +462,8 @@
                 inquiryTimeoutId = null;
 
                 confirmationBanner.classList.add("hidden");
+
+                appendMessage("You", "不了，谢谢。");
                 appendMessage("Agent (Proactive)", "好的，如果您需要帮助，可以随时向我提问。");
                 currentAssistanceRequestId = null;
             });
@@ -475,6 +505,8 @@
                             inquiryTimeoutId = setTimeout(() => {
                                 console.log("Inquiry timed out. Hiding banner.");
                                 confirmationBanner.classList.add("hidden");
+
+                                appendMessage("You", "用户无响应。");
                                 appendMessage("Agent (Proactive)", "系统建议已超时，自动为您关闭。");
                                 currentAssistanceRequestId = null; // 清理ID
                                 inquiryTimeoutId = null; // 清理计时器ID

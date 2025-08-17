@@ -26,17 +26,19 @@ from state import AgentState
 from agents.planner import run_planner
 from agents.tool_manager import run_tool_manager
 from agents.user_state_modeler import UserStateModeler
+from agents.memory_agent import run_memory_agent
 from proactive_service import proactive_monitoring_loop
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from utils.mcp_config_loader import load_mcp_servers_config
-from utils.helpers import setup_logging, load_user_habits
+from utils.helpers import setup_logging, load_user_habits, log_message
 
 # --- 全局变量 ---
 llm = None  # <--- 将llm设为全局变量
 tools_config = {} # <--- 将tools_config设为全局变量
 executable_tools = {} # <--- 将executable_tools设为全局变量
 core_agent_app = None
+memory_agent = None
 SESSIONS = {}
 message_queue = asyncio.Queue()
 pending_assistance_requests = {}
@@ -57,7 +59,7 @@ def dict_to_message(data: dict) -> BaseMessage:
 
 # --- 初始化函数 ---
 def initialize_system():
-    global core_agent_app, llm, tools_config, executable_tools
+    global core_agent_app, memory_agent_app, llm, tools_config, executable_tools
     print("--- System Initializing ---")
     if not os.path.exists(SESSIONS_DIR):
         os.makedirs(SESSIONS_DIR)
@@ -81,7 +83,7 @@ def initialize_system():
 
     user_habits = load_user_habits()
     workflow = StateGraph(AgentState)
-    planner_node = partial(run_planner, llm=llm, tools_config=tools_config, user_habits=user_habits)
+    planner_node = partial(run_planner, llm=llm, tools_config=tools_config, user_habits=user_habits, executable_tools=executable_tools)
     tool_manager_node = partial(run_tool_manager, executable_tools=executable_tools)
     workflow.add_node("planner", planner_node)
     workflow.add_node("tool_manager", tool_manager_node)
@@ -95,6 +97,36 @@ def initialize_system():
     workflow.add_edge("tool_manager", "planner")
     core_agent_app = workflow.compile()
     print("--- Core Dialogue Agent Initialized Successfully ---")
+
+    # --- 构建和编译记忆Agent工作流 ---
+    print("--- Building Memory Agent ---")
+    memory_workflow = StateGraph(AgentState)
+
+    # 筛选出只用于记忆的工具
+    memory_tool_names = [
+        "create_entities", "create_relations", "add_observations",
+        "delete_entities", "delete_observations", "delete_relations",
+        "read_graph", "search_nodes", "open_nodes"
+    ]
+    memory_tools_config = {name: tools_config[name] for name in memory_tool_names if name in tools_config}
+    
+    memory_agent_node = partial(run_memory_agent, llm=llm, tools_config=memory_tools_config)
+    
+    # 记忆Agent只需要两个节点：提炼节点 和 执行所有工具的节点
+    memory_workflow.add_node("memory_agent", memory_agent_node)
+    
+    # 复用现有的 tool_manager 节点
+    memory_tool_manager_node = partial(run_tool_manager, executable_tools=executable_tools)
+    memory_workflow.add_node("tool_manager", memory_tool_manager_node)
+    
+    memory_workflow.set_entry_point("memory_agent")
+    
+    # 记忆Agent提炼完工具调用后，直接交给 tool_manager 执行，然后结束
+    memory_workflow.add_edge("memory_agent", "tool_manager")
+    memory_workflow.add_edge("tool_manager", END)
+    
+    memory_agent_app = memory_workflow.compile()
+    print("--- Memory Agent Initialized Successfully ---")
 
 # --- 会话状态函数 ---
 async def get_session_state(session_id: str) -> dict: # 1. 改为 async def
@@ -313,6 +345,45 @@ async def request_assistance():
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": f"An error occurred: {e}"}), 500
+
+@app.route('/end_chat', methods=['POST'])
+async def end_chat():
+    """
+    当用户结束会话时，触发记忆总结Agent。
+    这是一个后台任务，不需要立即返回结果给用户。
+    """
+    if not memory_agent_app:
+        return jsonify({"status": "error", "message": "Memory Agent not ready."}), 503
+    
+    try:
+        data = await request.get_json()
+        session_id = data.get('session_id')
+        if not session_id:
+            return jsonify({"status": "error", "message": "No session ID provided."}), 400
+        
+        log_message(f"--- Received request to end and memorize session: {session_id} ---")
+        
+        # 获取当前会话的完整状态
+        current_state = await get_session_state(session_id)
+        
+        # 【关键】使用 app.add_background_task 在后台异步执行记忆总结
+        # 这样可以立刻返回响应给前端，而无需等待记忆过程完成
+        async def run_memorization_in_background():
+            log_message(f"Starting background memorization for session {session_id}...")
+            # 注意：这里的 state 是一个副本，以防主会话状态被意外修改
+            memorization_state = {"messages": current_state["messages"][:], "log": []}
+            final_memory_state = await memory_agent_app.ainvoke(memorization_state, {"recursion_limit": 5})
+            log_message(f"Background memorization finished for session {session_id}.")
+            log_message(f"Final memory state log: {final_memory_state.get('log')}")
+
+        app.add_background_task(run_memorization_in_background)
+
+        # 立刻返回成功响应
+        return jsonify({"status": "success", "message": "Memory summarization process started in the background."})
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": f"An error occurred: {e}"}), 500
     
 # --- 程序退出时停止后台监听器 ---
 import atexit
