@@ -37,7 +37,7 @@
         "@modelcontextprotocol/server-memory"
       ],
       "env": {
-        "MEMORY_FILE_PATH": "E:/人机交互/CHI2026/CogAgent/CogAgent/config/memory.json"
+        "MEMORY_FILE_PATH": "E:/人机交互/CHI2026/CogAgent/CogAgent/memory/memory.json"
       }
     }
     

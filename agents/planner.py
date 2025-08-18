@@ -1,4 +1,5 @@
 # agents/planner.py
+import re
 import json
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from state import AgentState
@@ -130,7 +131,7 @@ async def run_planner(state: AgentState, llm, tools_config: dict, user_habits: d
 {json.dumps(tools_config, indent=2, ensure_ascii=False)}
 
 # 输出格式指令:
-你的最终输出**必须**严格遵循以下JSON格式之一，不包含任何其他文字。
+你的最终输出**必须**严格遵循以下JSON格式之一，不要加任何说明或 markdown 代码块。
 格式1 (调用工具): {{"tool_call": {{...}}}} 或 {{"tool_calls": [{{...}}, {{...}}]}}
 格式2 (直接回复/提问): {{"response": "..."}}
 """
@@ -161,7 +162,15 @@ async def run_planner(state: AgentState, llm, tools_config: dict, user_habits: d
 
     # --- 5. 统一处理 LLM 的 JSON 输出 (逻辑不变) ---
     response_str = response.content
-    cleaned_response = response_str.strip().lstrip("```json").rstrip("```").strip()
+    json_matches = re.findall(r'\{[\s\S]*\}', response_str)
+    if json_matches:
+        cleaned_response = json_matches[-1]  # 提取最后一个JSON对象
+    else:
+        cleaned_response = response_str.strip()
+        if cleaned_response.startswith("```json"):
+            cleaned_response = cleaned_response[len("```json"):].strip()
+        if cleaned_response.endswith("```"):
+            cleaned_response = cleaned_response[:-3].strip()
     
     try:
         parsed_response = json.loads(cleaned_response)
@@ -207,8 +216,12 @@ async def run_planner(state: AgentState, llm, tools_config: dict, user_habits: d
             state['messages'].append(AIMessage(content=f"收到了意外的规划结果: {cleaned_response}"))
 
     except json.JSONDecodeError:
-        log_message(f"Planner failed to return JSON. Raw output: {cleaned_response}")
-        state['messages'].append(AIMessage(content=cleaned_response))
+        # 如果 cleaned_response 是 '"{...}"' 这种字符串，再解析一层
+        try:
+            parsed_response = json.loads(json.loads(cleaned_response))
+        except Exception:
+            # 还是失败就直接返回原始内容
+            state['messages'].append(AIMessage(content=cleaned_response))
     
     state['log'].append("Planner node finished.")
     return state

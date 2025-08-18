@@ -158,11 +158,37 @@
                 senderStrong.textContent = sender + ": ";
                 messageBubble.appendChild(senderStrong);
                 
-                // 如果有内容，则直接作为HTML插入
-                if (htmlContent) {
-                    const contentSpan = document.createElement("span");
-                    contentSpan.innerHTML = htmlContent;
-                    messageBubble.appendChild(contentSpan);
+                // 用正则分割文本和代码块
+                // 支持多段代码块和多段普通文本
+                const parts = [];
+                let lastIndex = 0;
+                const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+                let match;
+                while ((match = codeBlockRegex.exec(htmlContent)) !== null) {
+                    // 普通文本部分
+                    if (match.index > lastIndex) {
+                        parts.push({ type: "text", content: htmlContent.slice(lastIndex, match.index) });
+                    }
+                    // 代码块部分
+                    parts.push({ type: "code", lang: match[1] || "", content: match[2] });
+                    lastIndex = codeBlockRegex.lastIndex;
+                }
+                // 剩余的普通文本
+                if (lastIndex < htmlContent.length) {
+                    parts.push({ type: "text", content: htmlContent.slice(lastIndex) });
+                }
+
+                // 分别渲染
+                for (const part of parts) {
+                    if (part.type === "code") {
+                        const codeElem = document.createElement("pre");
+                        codeElem.innerHTML = `<code class="language-${part.lang}">${escapeHtml(part.content)}</code>`;
+                        messageBubble.appendChild(codeElem);
+                    } else {
+                        const contentSpan = document.createElement("span");
+                        contentSpan.innerHTML = escapeHtml(part.content).replace(/\n/g, "<br>");
+                        messageBubble.appendChild(contentSpan);
+                    }
                 }
 
                 // 如果有关联的图片URL，则创建并添加一个图片预览
@@ -407,7 +433,7 @@
                     });
                     if (!response.ok) { const errorData = await response.json(); throw new Error(errorData.error || "Server error"); }
                     const data = await response.json();
-                    appendMessage("Agent", escapeHtml(data.response).replace(/\n/g, "<br>"));
+                    appendMessage("Agent", data.response);
                 } catch (error) {
                     appendMessage("System Error", error.message);
                 } finally {
