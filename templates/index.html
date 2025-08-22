@@ -5,6 +5,8 @@
     <title>Core Agent Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="{{ url_for('static', filename='chart.js') }}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@2.3.6/dist/purify.min.js"></script>
     <style>
         /* 页面布局和基本样式 */
         body, html { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
@@ -73,6 +75,36 @@
             flex-grow: 0;       /* 禁止它伸展 */
             flex-shrink: 0;     /* 禁止它收缩 */
             flex-basis: 260px;  /* 设置一个固定的基础宽度 */
+        }
+
+        /* 为代码块(pre)和行内代码(code)设置统一样式 */
+        .message-bubble code {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; /* 使用等宽字体，对代码更友好 */
+            font-size: 0.9em; /* 比普通文本稍小一点 */
+            background-color: #e9ecef; /* 给个淡淡的背景色以区分 */
+            padding: 2px 5px;
+            border-radius: 4px;
+        }
+
+        /* 专门针对多行代码块 (```...```) 的样式 */
+        .message-bubble pre {
+            background-color: #282c34; /* 深色背景，更像IDE */
+            color: #abb2bf;           /* 浅色文字 */
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 10px;
+            margin-bottom: 5px;
+            
+            /* --- 解决溢出问题的核心代码 --- */
+            overflow-x: auto;   /* 当内容横向超出时，显示水平滚动条 */
+            white-space: pre;     /* 保持 pre 标签原有的空白和换行处理 */
+        }
+
+        /* 清除代码块(pre)内部的code标签的额外样式，让它继承pre的样式 */
+        .message-bubble pre code {
+            background-color: transparent; /* 背景色由父元素 pre 控制 */
+            padding: 0;                    /* 内边距也由 pre 控制 */
+            color: inherit;                /* 字体颜色继承 pre 的设置 */
         }
 
     </style>
@@ -170,35 +202,43 @@
                 senderStrong.textContent = sender + ": ";
                 messageBubble.appendChild(senderStrong);
 
-                // 将传入的纯文本内容（textContent）进行处理和渲染
-                // 现在的textContent不包含附件信息了
-                const parts = [];
-                let lastIndex = 0;
-                const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
-                let match;
-                while ((match = codeBlockRegex.exec(textContent)) !== null) {
-                    if (match.index > lastIndex) {
-                        parts.push({ type: "text", content: textContent.slice(lastIndex, match.index) });
-                    }
-                    parts.push({ type: "code", lang: match[1] || "", content: match[2] });
-                    lastIndex = codeBlockRegex.lastIndex;
-                }
-                if (lastIndex < textContent.length) {
-                    parts.push({ type: "text", content: textContent.slice(lastIndex) });
-                }
+                // 创建一个临时的 div 来容纳解析后的 HTML 内容
+                const contentContainer = document.createElement('div');
+                contentContainer.style.display = 'inline'; // 让它像 span 一样，不影响布局
 
-                for (const part of parts) {
-                    if (part.type === "code") {
-                        const codeElem = document.createElement("pre");
-                        codeElem.innerHTML = `<code class="language-${part.lang}">${escapeHtml(part.content)}</code>`;
-                        messageBubble.appendChild(codeElem);
-                    } else {
-                        const contentSpan = document.createElement("span");
-                        // 只对文本部分进行换行处理
-                        contentSpan.innerHTML = escapeHtml(part.content).replace(/\n/g, "<br>");
-                        messageBubble.appendChild(contentSpan);
-                    }
-                }
+                const dirtyHtml = marked.parse(textContent, { breaks: true, gfm: true }); // breaks: true 让换行符变成 <br>, gfm: true 启用GitHub风格的Markdown
+                contentContainer.innerHTML = dirtyHtml;
+                messageBubble.appendChild(contentContainer);
+
+                // // 将传入的纯文本内容（textContent）进行处理和渲染
+                // // 现在的textContent不包含附件信息了
+                // const parts = [];
+                // let lastIndex = 0;
+                // const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+                // let match;
+                // while ((match = codeBlockRegex.exec(textContent)) !== null) {
+                //     if (match.index > lastIndex) {
+                //         parts.push({ type: "text", content: textContent.slice(lastIndex, match.index) });
+                //     }
+                //     parts.push({ type: "code", lang: match[1] || "", content: match[2] });
+                //     lastIndex = codeBlockRegex.lastIndex;
+                // }
+                // if (lastIndex < textContent.length) {
+                //     parts.push({ type: "text", content: textContent.slice(lastIndex) });
+                // }
+
+                // for (const part of parts) {
+                //     if (part.type === "code") {
+                //         const codeElem = document.createElement("pre");
+                //         codeElem.innerHTML = `<code class="language-${part.lang}">${escapeHtml(part.content)}</code>`;
+                //         messageBubble.appendChild(codeElem);
+                //     } else {
+                //         const contentSpan = document.createElement("span");
+                //         // 只对文本部分进行换行处理
+                //         contentSpan.innerHTML = escapeHtml(part.content).replace(/\n/g, "<br>");
+                //         messageBubble.appendChild(contentSpan);
+                //     }
+                // }
 
                 // --- 新增逻辑：独立渲染附件信息 ---
                 if (attachmentInfo && attachmentInfo.name) {
