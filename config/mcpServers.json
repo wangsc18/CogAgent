@@ -10,24 +10,24 @@
         "@antv/mcp-server-chart"
       ]
     },
-    
-    "ppt": {
-      "command": "python",
+
+    "exa": {
+      "command": "npx",
       "args": [
-        "config/mcptools/Office-PowerPoint-MCP-Server/ppt_mcp_server.py"
-      ],
-      "env": {}
-    },
-    
-    "filesystem": {
-      "command": "cmd",
-      "args": [
-        "/c",
-        "npx",
         "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "E:/人机交互/CHI2026/CogAgent"
+        "@smithery/cli@latest",
+        "run",
+        "exa",
+        "--key",
+        "b624ec50-9b19-4cd0-95e7-e0c3ad02d0af",
+        "--profile",
+        "cognitive-cicada-puOJmZ"
       ]
+    },
+
+    "notionMCP": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.notion.com/mcp"]
     },
 
     "memory": {
@@ -38,6 +38,16 @@
       ],
       "env": {
         "MEMORY_FILE_PATH": "E:/人机交互/CHI2026/CogAgent/CogAgent/memory/memory.json"
+      }
+    },
+
+    "universal-email": {
+      "command": "node",
+      "args": ["config/mcptools/email-mcp/index.js"],
+      "env": {
+        "EMAIL_USER": "2052744478@qq.com",
+        "EMAIL_PASSWORD": "sycjcwnupgeuchbh",
+        "EMAIL_TYPE": "auto"
       }
     }
     
