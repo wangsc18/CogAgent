@@ -18,12 +18,12 @@ class UserStateModeler:
         self.limit = history_limit
         # 【核心】定义分数模型的权重和阈值
         self.weights = {
-            "cognitive_load": 0.5, # 认知负荷分数占 50% 权重
-            "keyboard": 0.25,      # 键盘行为占 25% 权重
-            "mouse": 0.1,        # 鼠标行为占 10% 权重
-            "window_switch": 0.15 # 窗口切换占 15% 权重
+            "cognitive_load": 0.6, # 认知负荷作为基础分的权重，提升至60%
+            "stuck_bonus": 1.5,  # “卡壳信号”的奖励乘数，非常重要
+            "flow_signal": 0.5, # “心流”状态下的惩罚乘数
+            "window_switch": 0.4 # “分心信号”（窗口切换）的权重
         }
-        self.proactive_threshold = 10 # 当总分超过 50 (满分100) 时，触发主动服务
+        self.proactive_threshold = 50 # 阈值
 
     def log_current_state_from_data(self, activity: dict):
         """从外部接收活动数据并记录。"""
@@ -65,11 +65,15 @@ class UserStateModeler:
         else:
             scores["cognitive_load"] = 0
 
-        # b) 键盘得分 (线性映射, 超过8Hz为满分)
-        scores["keyboard"] = min(100, (avg_keyboard_hz / 8.0) * 100)
+        # b) “卡壳”信号分 (Stuck Signal Score)
+        is_stuck = (scores["cognitive_load"] > 60) and (avg_keyboard_hz < 0.5 and avg_mouse_hz < 0.5)
+        scores["stuck_signal"] = 100 if is_stuck else 0 # 如果卡壳，信号分为满分100
 
-        # c) 鼠标得分 (线性映射, 超过5Hz为满分)
-        scores["mouse"] = min(100, (avg_mouse_hz / 5.0) * 100)
+        # c) “心流”信号分 (Flow Signal Score)
+        # 将键盘和鼠标活动归一化到一个0-100的“心流”分数
+        keyboard_flow = min(100, (avg_keyboard_hz / 8.0) * 100)
+        mouse_flow = min(100, (avg_mouse_hz / 5.0) * 50) # 鼠标权重较低
+        scores["flow_signal"] = (keyboard_flow * 0.7) + (mouse_flow * 0.3) # 键盘占70%
         
         # d) 窗口切换得分 (线性映射, 超过5次为满分)
         scores["window_switch"] = min(100, (changed_windows_count / 5.0) * 100)
@@ -77,9 +81,9 @@ class UserStateModeler:
         # --- 3. 计算加权总分 ---
         total_score = (
             scores["cognitive_load"] * self.weights["cognitive_load"] +
-            scores["keyboard"] * self.weights["keyboard"] +
-            scores["mouse"] * self.weights["mouse"] +
-            scores["window_switch"] * self.weights["window_switch"]
+            scores["stuck_signal"] * self.weights["stuck_bonus"] +
+            scores["window_switch"] * self.weights["window_switch"] -
+            scores["flow_signal"] * self.weights["flow_signal"]
         )
 
         return {
@@ -91,7 +95,8 @@ class UserStateModeler:
                 "confidence": confidence,
                 "avg_keyboard_hz": avg_keyboard_hz,
                 "avg_mouse_hz": avg_mouse_hz,
-                "changed_windows_count": changed_windows_count
+                "changed_windows_count": changed_windows_count,
+                "is_stuck": is_stuck
             }
         }
 

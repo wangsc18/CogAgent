@@ -11,9 +11,9 @@
         .app-layout { display: flex; height: 100vh; }
         .main-content { flex-grow: 1; display: flex; flex-direction: column; background-color: #f4f7f9; }
         #dashboard-container { display: flex; gap: 20px; padding: 20px; border-bottom: 1px solid #e0e0e0; background-color: white; height: 300px; min-height: 300px; }
-        .chart-card { flex: 1; min-width: 0; background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); display: flex; flex-direction: column; }
+        .chart-card { min-width: 0; background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); display: flex; flex-direction: column; min-height: 0; }
         .chart-title { font-size: 16px; font-weight: 600; margin-bottom: 15px; color: #333; flex-shrink: 0; }
-        .chart-placeholder { flex-grow: 1; position: relative; height: 100%; }
+        .chart-placeholder { flex-grow: 1; position: relative; height: 80%; }
 
         /* 聊天界面样式 */
         .chat-interface-container { position: relative; display: flex; flex-direction: column; flex-grow: 1; height: 0; }
@@ -63,23 +63,35 @@
             margin-top: 5px;
         }
 
+        /* 让左边的折线图卡片占据所有剩余空间 */
+        #line-chart-card {
+            flex-grow: 1; /* 允许它伸展 */
+        }
+
+        /* 让右边的扇形图卡片保持固定宽度 */
+        #pie-chart-card {
+            flex-grow: 0;       /* 禁止它伸展 */
+            flex-shrink: 0;     /* 禁止它收缩 */
+            flex-basis: 260px;  /* 设置一个固定的基础宽度 */
+        }
+
     </style>
 </head>
 <body>
     <div class="app-layout">
         <main class="main-content">
             <div id="dashboard-container" class="dashboard-container">
-                <div class="chart-card">
+                <div class="chart-card" id="line-chart-card">
                     <div class="chart-title">用户认知负荷变化</div>
                     <div class="chart-placeholder">
                         <!-- 2. 用 canvas 替换占位符 div -->
                         <canvas id="cognitiveLoadChart"></canvas>
                     </div>
                 </div>
-                <div class="chart-card">
-                    <div class="chart-title">任务类型分布</div>
+                <div class="chart-card" id="pie-chart-card">
+                    <div class="chart-title">会话认知负荷分布</div>
                     <div class="chart-placeholder">
-                        <canvas id="taskTypeChart"></canvas>
+                        <canvas id="cognitiveLoadDistributionChart"></canvas>
                     </div>
                 </div>
             </div>
@@ -209,6 +221,7 @@
 
             // --- 3. 图表初始化和更新逻辑 ---
             const CHART_DATA_LIMIT = 10;
+            let cognitiveLoadCounts = { low: 0, medium: 0, high: 0 };
 
             // --- 1. 初始化折线图 ---
             const ctxLine = document.getElementById('cognitiveLoadChart').getContext('2d');
@@ -260,7 +273,60 @@
                 }
             });
 
+            // --- 2. 认知负荷分布扇形图 ---
+            const ctxPie = document.getElementById('cognitiveLoadDistributionChart').getContext('2d');
+            const pieChartData = {
+                labels: ['Low', 'Medium', 'High'],
+                datasets: [{
+                    label: '认知负荷次数',
+                    // 初始数据从我们的累积状态变量中获取
+                    data: [cognitiveLoadCounts.low, cognitiveLoadCounts.medium, cognitiveLoadCounts.high], 
+                    backgroundColor: [
+                        'rgba(75, 192, 192, 0.7)',  // 绿色，代表轻松
+                        'rgba(255, 206, 86, 0.7)',  // 黄色，代表中等
+                        'rgba(255, 99, 132, 0.7)'   // 红色，代表高负荷
+                    ],
+                    borderColor: [
+                        'rgba(75, 192, 192, 1)',
+                        'rgba(255, 206, 86, 1)',
+                        'rgba(255, 99, 132, 1)'
+                    ],
+                    borderWidth: 1,
+                    hoverOffset: 8
+                }]
+            };
+            // 将图表实例存储在变量中，以便后续更新
+            const cognitiveLoadPieChart = new Chart(ctxPie, {
+                type: 'pie', // 类型改为 pie
+                data: pieChartData,
+                options: {
+                    responsive: true,
+                    // maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    const value = context.raw;
+                                    const sum = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                                    const percentage = sum > 0 ? ((value / sum) * 100).toFixed(1) + '%' : '0%';
+                                    return `${label}${value} 次 (${percentage})`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
             function updateCognitiveLoadChart(dataPoint) {
+
+                // 更新折线图
                 let loadValue = 0; // 默认为“低”
                 if (dataPoint.cognitive_load === 'Medium Load') {
                     loadValue = 1;
@@ -276,40 +342,23 @@
                     lineChartData.datasets.forEach(dataset => { dataset.data.shift(); });
                 }
                 cognitiveLoadChart.update();
-            }
 
-            // --- 2. 初始化柱状图 (使用静态数据作为示例) ---
-            const ctxBar = document.getElementById('taskTypeChart').getContext('2d');
-            const barChartData = {
-                labels: ['代码编写', '文档阅读', '沟通', '其他'],
-                datasets: [{
-                    label: '任务时长 (分钟)',
-                    data: [45, 25, 15, 5], // 示例数据
-                    backgroundColor: [
-                        'rgba(255, 99, 132, 0.6)',
-                        'rgba(54, 162, 235, 0.6)',
-                        'rgba(255, 206, 86, 0.6)',
-                        'rgba(153, 102, 255, 0.6)'
-                    ],
-                    borderColor: [
-                        'rgba(255, 99, 132, 1)',
-                        'rgba(54, 162, 235, 1)',
-                        'rgba(255, 206, 86, 1)',
-                        'rgba(153, 102, 255, 1)'
-                    ],
-                    borderWidth: 1
-                }]
-            };
-            new Chart(ctxBar, {
-                type: 'bar', // 类型为 bar
-                data: barChartData,
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: { y: { beginAtZero: true } },
-                    plugins: { legend: { display: false } } // 隐藏图例，让图表更简洁
+                // 更新扇形图
+                if (dataPoint.cognitive_load === 'High Load') {
+                    cognitiveLoadCounts.high++;
+                } else if (dataPoint.cognitive_load === 'Medium Load') {
+                    cognitiveLoadCounts.medium++;
+                } else { // 默认为 'Low Load'
+                    cognitiveLoadCounts.low++;
                 }
-            });
+                // 将新的计数值更新到扇形图的数据对象中
+                pieChartData.datasets[0].data = [
+                    cognitiveLoadCounts.low,
+                    cognitiveLoadCounts.medium,
+                    cognitiveLoadCounts.high
+                ];
+                cognitiveLoadPieChart.update();
+            }
 
             // --- 文件上传功能 ---
             fileUploadButton.addEventListener("click", () => fileInput.click());
