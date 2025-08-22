@@ -33,6 +33,9 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from utils.mcp_config_loader import load_mcp_servers_config
 from utils.helpers import setup_logging, load_user_habits, log_message
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # --- 全局变量 ---
 llm = None  # <--- 将llm设为全局变量
 tools_config = {} # <--- 将tools_config设为全局变量

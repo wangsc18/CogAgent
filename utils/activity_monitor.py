@@ -4,6 +4,7 @@ import threading
 import time
 from pynput import keyboard, mouse
 import pygetwindow as gw
+from pygetwindow import PyGetWindowException
 
 class InputWindowMonitor:
     def __init__(self, interval=2.0):
@@ -36,7 +37,15 @@ class InputWindowMonitor:
                 self.keyboard_count = 0
                 self.mouse_count = 0
 
-                windows = gw.getWindowsWithTitle("")
+                # windows = gw.getWindowsWithTitle("")
+                windows = []
+                for w in gw.getWindowsWithTitle(""):
+                    try:
+                        _ = w.left  # 强制访问一下属性以触发潜在异常
+                        windows.append(w)
+                    except (OSError, PyGetWindowException) as e:
+                        # 无效窗口，跳过
+                        continue
                 visible = [w for w in windows if w.title.strip() and not w.isMinimized]
                 self.open_apps_count = len(visible)
                 self.window_titles = [w.title for w in visible]

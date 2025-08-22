@@ -146,7 +146,7 @@
             // --- 辅助函数 ---
             function escapeHtml(text) { const div = document.createElement("div"); div.textContent = text; return div.innerHTML; }
             function adjustTextareaHeight() { if (!commandInput) return; commandInput.style.height = "auto"; const maxHeight = parseFloat(getComputedStyle(commandInput).lineHeight) * 4; commandInput.style.height = Math.min(commandInput.scrollHeight, maxHeight) + "px"; commandInput.style.overflowY = (commandInput.scrollHeight > maxHeight) ? "auto" : "hidden"; }
-            function appendMessage(sender, htmlContent, imageUrl = null) {
+            function appendMessage(sender, textContent, imageUrl = null, attachmentInfo = null) {
                 const senderClass = sender === "You" ? "user" : (sender.startsWith("Agent (Proactive)") ? "proactive_agent" : "reactive_agent");
                 
                 const messageRow = document.createElement("div");
@@ -157,28 +157,24 @@
                 const senderStrong = document.createElement("strong");
                 senderStrong.textContent = sender + ": ";
                 messageBubble.appendChild(senderStrong);
-                
-                // 用正则分割文本和代码块
-                // 支持多段代码块和多段普通文本
+
+                // 将传入的纯文本内容（textContent）进行处理和渲染
+                // 现在的textContent不包含附件信息了
                 const parts = [];
                 let lastIndex = 0;
                 const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
                 let match;
-                while ((match = codeBlockRegex.exec(htmlContent)) !== null) {
-                    // 普通文本部分
+                while ((match = codeBlockRegex.exec(textContent)) !== null) {
                     if (match.index > lastIndex) {
-                        parts.push({ type: "text", content: htmlContent.slice(lastIndex, match.index) });
+                        parts.push({ type: "text", content: textContent.slice(lastIndex, match.index) });
                     }
-                    // 代码块部分
                     parts.push({ type: "code", lang: match[1] || "", content: match[2] });
                     lastIndex = codeBlockRegex.lastIndex;
                 }
-                // 剩余的普通文本
-                if (lastIndex < htmlContent.length) {
-                    parts.push({ type: "text", content: htmlContent.slice(lastIndex) });
+                if (lastIndex < textContent.length) {
+                    parts.push({ type: "text", content: textContent.slice(lastIndex) });
                 }
 
-                // 分别渲染
                 for (const part of parts) {
                     if (part.type === "code") {
                         const codeElem = document.createElement("pre");
@@ -186,12 +182,20 @@
                         messageBubble.appendChild(codeElem);
                     } else {
                         const contentSpan = document.createElement("span");
+                        // 只对文本部分进行换行处理
                         contentSpan.innerHTML = escapeHtml(part.content).replace(/\n/g, "<br>");
                         messageBubble.appendChild(contentSpan);
                     }
                 }
 
-                // 如果有关联的图片URL，则创建并添加一个图片预览
+                // --- 新增逻辑：独立渲染附件信息 ---
+                if (attachmentInfo && attachmentInfo.name) {
+                    const attachmentSpan = document.createElement("span");
+                    attachmentSpan.className = "attachment-info"; // 使用你已经定义好的CSS类
+                    attachmentSpan.textContent = `(已附加文件: ${escapeHtml(attachmentInfo.name)})`;
+                    messageBubble.appendChild(attachmentSpan);
+                }
+
                 if (imageUrl) {
                     const imgPreview = document.createElement("img");
                     imgPreview.src = imageUrl;
@@ -374,50 +378,54 @@
                 const isEndCommand = userInput.toLowerCase() === 'end';
                 if (isEndCommand) {
                     appendMessage("System", "好的，正在为您结束当前会话并保存记忆...");
-                    // 额外调用 /end_chat 端点
+                    // ... (end chat 逻辑保持不变)
                     fetch("/end_chat", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ session_id: sessionId })
                     }).then(response => response.json()).then(data => {
                         console.log("End chat response:", data);
-                        // 可以在这里提示用户可以点击“新建对话”了
                         appendMessage("System", "记忆已开始后台保存。您可以点击左上角的“新建对话”按钮开始新的会话。");
                     }).catch(error => {
                         console.error("Error ending chat:", error);
                         appendMessage("System Error", "结束会话时发生错误: " + error.message);
                     });
                     
-                    // 清理输入框并禁用发送按钮
                     commandInput.value = "";
                     adjustTextareaHeight();
-                    sendButton.disabled = true; // 禁用发送，因为会话已结束
-                    return; // 结束函数，不再执行后续的 /chat 调用
-                    // 似乎没有起到作用？
+                    sendButton.disabled = true;
+                    return;
                 }
 
-                let messageContentHtml = escapeHtml(userInput).replace(/\n/g, "<br>");
+                // 1. 准备一个变量用于发送到后端的 payload
+                let messageForPayload = userInput;
 
-                // 检查是否有附加文件（并且不是图片预览，因为图片有自己的显示方式）
-                if (attachedFile && attachedFile.type === 'document') {
-                    const fileNameHtml = escapeHtml(attachedFile.name);
-                    // 将文件信息包裹在我们刚刚定义的CSS类中
-                    messageContentHtml += `<span class="attachment-info">(已附加文件: ${fileNameHtml})</span>`;
+                // 2. 如果用户没有输入文本但附加了文件，则为 payload 提供一个默认指令
+                if (messageForPayload === "" && attachedFile) {
+                    messageForPayload = `请分析或处理这个文件：${attachedFile.name}`; // 给LLM一个明确的指令
                 }
-                // 在显示消息时，检查是否有图片预览URL
-                appendMessage("You", messageContentHtml, attachedFile ? attachedFile.previewUrl : null);
+
+                // 如果是文档，就准备 attachmentInfo 对象，否则为 null
+                const attachmentInfoForDisplay = (attachedFile && attachedFile.type === 'document') ? attachedFile : null;
+                
+                // 如果是图片，就准备 imageUrl，否则为 null
+                const imageUrlForDisplay = (attachedFile && attachedFile.type === 'image') ? attachedFile.previewUrl : null;
+                
+                // 【注意】前端显示的消息仍然是用户原始的输入（空字符串），这样UI上是正确的
+                appendMessage("You", userInput, imageUrlForDisplay, attachmentInfoForDisplay);
+
 
                 const payload = {
-                    message: userInput,
+                    // 【注意】发送到后端的是我们处理过的 messageForPayload
+                    message: messageForPayload, 
                     session_id: sessionId
                 };
                 
-                // 如果有附件（无论是图片还是文件），都将其加入 payload
                 if (attachedFile) {
                     payload.file = {
                         name: attachedFile.name,
                         content: attachedFile.content,
-                        type: attachedFile.type || "document" // 默认为文档类型
+                        type: attachedFile.type || "document"
                     };
                 }
                 
@@ -437,7 +445,6 @@
                 } catch (error) {
                     appendMessage("System Error", error.message);
                 } finally {
-                    // 【修改】发送后，清空附件状态
                     attachedFile = null;
                     fileInput.value = ""; 
                     fileUploadStatus.textContent = "";
