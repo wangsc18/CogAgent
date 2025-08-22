@@ -162,66 +162,70 @@ async def run_planner(state: AgentState, llm, tools_config: dict, user_habits: d
 
     # --- 5. 统一处理 LLM 的 JSON 输出 (逻辑不变) ---
     response_str = response.content
-    json_matches = re.findall(r'\{[\s\S]*\}', response_str)
-    if json_matches:
-        cleaned_response = json_matches[-1]  # 提取最后一个JSON对象
+    json_str = None
+    # 优先寻找被 ```json ... ``` 包围的代码块
+    match = re.search(r"```json\s*(\{[\s\S]*?\})\s*```", response_str, re.DOTALL)
+    if match:
+        json_str = match.group(1)
+        log_message("Found JSON within a markdown code block.")
     else:
-        cleaned_response = response_str.strip()
-        if cleaned_response.startswith("```json"):
-            cleaned_response = cleaned_response[len("```json"):].strip()
-        if cleaned_response.endswith("```"):
-            cleaned_response = cleaned_response[:-3].strip()
+        # 如果没有找到代码块，则尝试从字符串中提取第一个有效的JSON对象
+        # 这对于处理不带markdown标记的纯JSON输出很有用
+        match = re.search(r'\{[\s\S]*\}', response_str)
+        if match:
+            json_str = match.group(0)
+            log_message("Found JSON directly in the response string.")
+
+    # 如果两种方法都找不到JSON，则将整个响应视为直接回复
+    if not json_str:
+        log_message("No JSON object found in the response. Treating as a direct reply.")
+        state['messages'].append(AIMessage(content=response_str))
+        state['log'].append("Planner node finished (direct reply).")
+        return state
     
+    # --- 开始解析提取出的 JSON 字符串 ---
     try:
-        parsed_response = json.loads(cleaned_response)
+        parsed_response = json.loads(json_str)
+        
         if "tool_call" in parsed_response or "tool_calls" in parsed_response:
-            # 兼容单个工具调用和多个工具调用两种情况
             raw_tool_calls = parsed_response.get("tool_call") or parsed_response.get("tool_calls")
             
-            # 确保我们处理的是一个列表
             if not isinstance(raw_tool_calls, list):
                 raw_tool_calls = [raw_tool_calls]
             
-            # 准备一个列表来存放格式化后的工具调用
             valid_tool_calls = []
-
-            # 遍历所有原始工具调用
             for tool_call in raw_tool_calls:
                 if not isinstance(tool_call, dict):
                     log_message(f"Skipping invalid tool call item: {tool_call}")
                     continue
                 
-                # 字段名转换，兼容 LLM 误输出
                 formatted_call = {
                     "name": tool_call.get("name") or tool_call.get("tool_name"),
-                    "args": tool_call.get("args") or tool_call.get("parameters") or {}, # 确保args是字典
+                    "args": tool_call.get("args") or tool_call.get("parameters") or {},
                     "id": tool_call.get("id", f"tool_call_{len(state['messages'])}_{len(valid_tool_calls)}")
                 }
                 valid_tool_calls.append(formatted_call)
             
             if valid_tool_calls:
                 log_message(f"Planner decided to call tools: {valid_tool_calls}")
-                # 将所有有效的工具调用放入一条 AIMessage 的 tool_calls 列表中
                 state['messages'].append(AIMessage(content="", tool_calls=valid_tool_calls))
             else:
-                # 如果LLM声称要调用工具，但格式完全错误，则提供一个回复
-                log_message(f"Planner found tool_call key but failed to parse any valid tools. Raw: {raw_tool_calls}")
-                state['messages'].append(AIMessage(content=f"我试图调用一个工具，但收到了无法解析的指令。"))
+                log_message(f"Planner found 'tool_call' key but failed to parse any valid tools. Raw: {raw_tool_calls}")
+                state['messages'].append(AIMessage(content="我试图调用一个工具，但收到了无法解析的指令。"))
 
         elif "response" in parsed_response:
             log_message(f"Planner decided to respond directly: {parsed_response['response']}")
             state['messages'].append(AIMessage(content=parsed_response['response']))
         else:
-            log_message(f"Planner returned unexpected JSON: {cleaned_response}")
-            state['messages'].append(AIMessage(content=f"收到了意外的规划结果: {cleaned_response}"))
+            log_message(f"Planner returned unexpected JSON structure: {json_str}")
+            # 如果JSON结构不符合预期，返回整个JSON作为内容，方便调试
+            state['messages'].append(AIMessage(content=f"收到了意外的规划结果: ```json\n{json_str}\n```"))
 
     except json.JSONDecodeError:
-        # 如果 cleaned_response 是 '"{...}"' 这种字符串，再解析一层
-        try:
-            parsed_response = json.loads(json.loads(cleaned_response))
-        except Exception:
-            # 还是失败就直接返回原始内容
-            state['messages'].append(AIMessage(content=cleaned_response))
+        log_message(f"Failed to decode JSON. The LLM response might be a mix of text and malformed JSON. Raw response: {response_str}")
+        # 如果JSON解析失败，说明LLM的输出既不是标准JSON，也不是纯文本
+        # 此时，将原始、未裁剪的完整回复返回给用户是最好的选择
+        state['messages'].append(AIMessage(content=response_str))
     
     state['log'].append("Planner node finished.")
     return state

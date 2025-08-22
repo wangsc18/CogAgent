@@ -10,6 +10,7 @@ import threading
 import traceback
 from functools import partial
 from quart import Quart, render_template, request, jsonify, Response
+from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, SystemMessage, ToolMessage
 
@@ -67,8 +68,8 @@ def initialize_system():
     if not os.path.exists(SESSIONS_DIR):
         os.makedirs(SESSIONS_DIR)
     setup_logging()
-    os.environ['HTTP_PROXY'] = "http://127.0.0.1:7890"
-    os.environ['HTTPS_PROXY'] = "http://127.0.0.1:7890"
+    # os.environ['HTTP_PROXY'] = "http://127.0.0.1:7890"
+    # os.environ['HTTPS_PROXY'] = "http://127.0.0.1:7890"
     server_config = load_mcp_servers_config()
     mcp_client = MultiServerMCPClient(server_config["mcpServers"])
     print("Discovering MCP tools...")
@@ -82,7 +83,7 @@ def initialize_system():
     tools_config = {tool.name: {"description": tool.description, "args_schema": tool.args_schema} for tool in discovered_tools}
     executable_tools = {tool.name: tool for tool in discovered_tools}
 
-    llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+    llm = ChatOpenAI(model="gemini-2.5-pro", temperature=0)
 
     user_habits = load_user_habits()
     workflow = StateGraph(AgentState)
