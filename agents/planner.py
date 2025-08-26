@@ -138,6 +138,27 @@ async def run_planner(state: AgentState, llm, tools_config: dict, user_habits: d
 格式1 (调用工具): {{"tool_call": {{...}}}} 或 {{"tool_calls": [{{...}}, {{...}}]}}
 格式2 (直接回复/提问): {{"response": "..."}}
 """
+    # 消融实验对应的prompt
+#     decision_prompt_text = f"""
+# # Agent角色与行为准则
+# 你是一个AI助手，你的任务是直接、准确地解决用户的最新请求。
+
+# # 行为流程
+# 1. 读取用户最新输入，理解其直接需求。
+# 2. 检查是否有工具可以完成该需求，如果有则调用工具，否则直接回复。
+# 3. 不需要推断用户的隐性目标，不需要考虑用户的认知状态或长期习惯。
+# 4. 不需要处理记忆、历史、心智模型等信息，只关注当前输入和可用工具。
+
+# # 对话历史:
+# {history_str}
+# # 可用工具列表:
+# {json.dumps(tools_config, indent=2, ensure_ascii=False)}
+
+# # 输出格式指令:
+# 你的最终输出必须严格遵循以下JSON格式之一，不要加任何说明或 markdown 代码块。
+# 格式1 (调用工具): {{"tool_call": {{...}}}} 或 {{"tool_calls": [{{...}}, {{...}}]}}
+# 格式2 (直接回复/提问): {{"response": "..."}}
+# """
 
     # --- 4. 根据输入类型，决定发送给 LLM 的最终数据格式 ---
     is_multimodal = isinstance(last_message.content, list)

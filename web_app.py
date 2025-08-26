@@ -10,7 +10,7 @@ import threading
 import traceback
 from functools import partial
 from quart import Quart, render_template, request, jsonify, Response
-from langchain_openai import AzureChatOpenAI
+from langchain_openai import AzureChatOpenAI, ChatOpenAI
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, SystemMessage, ToolMessage
 
@@ -83,14 +83,15 @@ def initialize_system():
     tools_config = {tool.name: {"description": tool.description, "args_schema": tool.args_schema} for tool in discovered_tools}
     executable_tools = {tool.name: tool for tool in discovered_tools}
 
-    llm = AzureChatOpenAI(
-        temperature=0,
-        # AzureChatOpenAI 会自动从环境变量读取这些值，但显式传递更清晰
-        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        api_version=os.getenv("OPENAI_API_VERSION"),
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"), 
-    )
+    # llm = AzureChatOpenAI(
+    #     temperature=0,
+    #     # AzureChatOpenAI 会自动从环境变量读取这些值，但显式传递更清晰
+    #     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+    #     api_version=os.getenv("OPENAI_API_VERSION"),
+    #     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+    #     azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"), 
+    # )
+    llm = ChatOpenAI(model='gemini-2.5-pro', temperature=0)
 
     user_habits = load_user_habits()
     workflow = StateGraph(AgentState)
