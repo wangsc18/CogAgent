@@ -120,6 +120,7 @@ async def run_planner(state: AgentState, llm, tools_config: dict, user_habits: d
 *   **【处理附加信息】**: 如果有文件或图片，你的决策必须优先处理这些**用户主动提供的“焦点”信息**。
 *   **【处理工具结果】**: 如果上一轮是 `tool` 结果，你的任务是**解读结果并将其转化为对用户最有价值的洞察**，而不仅仅是简单总结。
 *   **【遵循用户心智模型】**: 你的沟通风格和行为模式应始终与你对用户的长期心智模型（`user_habits` 和 `memory_context`）保持一致，**提供一种连贯且可预测的交互体验**。
+*   **【考虑用户认知状态】**: 在做出决策时，考虑用户当前的认知负荷，高认知负荷下回答应尽量简短，由一句回答与一句必要的理由组成。
 
 {user_habits_str}
 {cognitive_context_str}
@@ -130,12 +131,14 @@ async def run_planner(state: AgentState, llm, tools_config: dict, user_habits: d
 # 可用工具列表:
 {json.dumps(tools_config, indent=2, ensure_ascii=False)}
 
+** 注意 **： 你的所有回复都应该先直接回答用户的问题，绝对不能有“我将进行分析”等未来时的表达，而是直接给出分析结果。
+
 # 输出格式指令:
 你的最终输出**必须**严格遵循以下JSON格式之一，不要加任何说明或 markdown 代码块。
 格式1 (调用工具): {{"tool_call": {{...}}}} 或 {{"tool_calls": [{{...}}, {{...}}]}}
 格式2 (直接回复/提问): {{"response": "..."}}
 """
-    
+
     # --- 4. 根据输入类型，决定发送给 LLM 的最终数据格式 ---
     is_multimodal = isinstance(last_message.content, list)
     
@@ -199,12 +202,19 @@ async def run_planner(state: AgentState, llm, tools_config: dict, user_habits: d
                     log_message(f"Skipping invalid tool call item: {tool_call}")
                     continue
                 
-                formatted_call = {
-                    "name": tool_call.get("name") or tool_call.get("tool_name"),
-                    "args": tool_call.get("args") or tool_call.get("parameters") or {},
-                    "id": tool_call.get("id", f"tool_call_{len(state['messages'])}_{len(valid_tool_calls)}")
-                }
-                valid_tool_calls.append(formatted_call)
+                tool_name = tool_call.get("name") or tool_call.get("tool_name")
+
+                # 只有当 tool_name 是一个非空字符串时，才认为这个工具调用是有效的
+                if tool_name and isinstance(tool_name, str):
+                    formatted_call = {
+                        "name": tool_name,
+                        "args": tool_call.get("args") or tool_call.get("parameters") or {},
+                        "id": tool_call.get("id", f"tool_call_{len(state['messages'])}_{len(valid_tool_calls)}")
+                    }
+                    valid_tool_calls.append(formatted_call)
+                else:
+                    # 如果 tool_name 是 None 或无效，则记录日志并跳过
+                    log_message(f"Skipping tool call with invalid or missing name: {tool_call}")
             
             if valid_tool_calls:
                 log_message(f"Planner decided to call tools: {valid_tool_calls}")
