@@ -221,19 +221,12 @@ async def run_planner(state: AgentState, llm, tools_config: dict, user_habits: d
                     log_message(f"Skipping invalid tool call item: {tool_call}")
                     continue
                 
-                tool_name = tool_call.get("name") or tool_call.get("tool_name")
-
-                # 只有当 tool_name 是一个非空字符串时，才认为这个工具调用是有效的
-                if tool_name and isinstance(tool_name, str):
-                    formatted_call = {
-                        "name": tool_name,
-                        "args": tool_call.get("args") or tool_call.get("parameters") or {},
-                        "id": tool_call.get("id", f"tool_call_{len(state['messages'])}_{len(valid_tool_calls)}")
-                    }
-                    valid_tool_calls.append(formatted_call)
-                else:
-                    # 如果 tool_name 是 None 或无效，则记录日志并跳过
-                    log_message(f"Skipping tool call with invalid or missing name: {tool_call}")
+                formatted_call = {
+                    "name": tool_call.get("name") or tool_call.get("tool_name"),
+                    "args": tool_call.get("args") or tool_call.get("parameters") or {},
+                    "id": tool_call.get("id", f"tool_call_{len(state['messages'])}_{len(valid_tool_calls)}")
+                }
+                valid_tool_calls.append(formatted_call)
             
             if valid_tool_calls:
                 log_message(f"Planner decided to call tools: {valid_tool_calls}")
