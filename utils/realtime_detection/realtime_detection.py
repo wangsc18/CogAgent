@@ -183,7 +183,7 @@ class RealtimeCognitiveLoadDetector:
     
     def run_detection(self):
         """运行实时检测"""
-        cap = cv2.VideoCapture(1)  # 打开摄像头
+        cap = cv2.VideoCapture(0)  # 打开摄像头
         
         if not cap.isOpened():
             print("无法打开摄像头")

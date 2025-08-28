@@ -1,5 +1,6 @@
 # agents/planner.py
 import re
+import ast
 import json
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from state import AgentState
@@ -86,6 +87,13 @@ async def run_planner(state: AgentState, llm, tools_config: dict, user_habits: d
 # 你的心智理论驱动的思考流程 (ToM-driven Thinking Process):
 你必须严格遵循以下三个步骤进行思考和决策。
 
+**【【【 最高优先级规则：处理工具返回结果 】】】**
+-   **检查**: 对话历史中的**最后一条消息**是否是 `tool` 类型？
+-   **如果是**: 你的**唯一且强制的任务**是**解读这个工具的返回结果，并将其转化为对用户有价值的、易于理解的自然语言回复**。
+    -   **行动**: 生成一个包含总结和洞察的 `response` JSON。
+    -   **绝对禁止**: 在这一步，你**绝对不能**调用任何新的工具或提出下一步的建议。**必须先完成对当前结果的报告。**
+    -   **完成此步骤后，立即停止所有后续思考。**
+
 **步骤 1: 意图层次化分析 (Hierarchical Intent Analysis)**
 
 1.  **识别用户的显性意图 (Explicit Intent)**: 准确识别用户最新请求中的**直接任务或问题 (A)**。这是你必须首先解决的核心。
@@ -118,7 +126,6 @@ async def run_planner(state: AgentState, llm, tools_config: dict, user_habits: d
 *在生成最终的 `tool_call` 或 `response` 时，你必须遵循以下规则：*
 
 *   **【处理附加信息】**: 如果有文件或图片，你的决策必须优先处理这些**用户主动提供的“焦点”信息**。
-*   **【处理工具结果】**: 如果上一轮是 `tool` 结果，你的任务是**解读结果并将其转化为对用户最有价值的洞察**，而不仅仅是简单总结。
 *   **【遵循用户心智模型】**: 你的沟通风格和行为模式应始终与你对用户的长期心智模型（`user_habits` 和 `memory_context`）保持一致，**提供一种连贯且可预测的交互体验**。
 *   **【考虑用户认知状态】**: 在做出决策时，考虑用户当前的认知负荷，高认知负荷下回答应尽量简短，由一句回答与一句必要的理由组成。
 
@@ -134,9 +141,10 @@ async def run_planner(state: AgentState, llm, tools_config: dict, user_habits: d
 ** 注意 **： 你的所有回复都应该先直接回答用户的问题，绝对不能有“我将进行分析”等未来时的表达，而是直接给出分析结果。
 
 # 输出格式指令:
-你的最终输出**必须**严格遵循以下JSON格式之一，不要加任何说明或 markdown 代码块。
+你的最终输出**必须**严格遵循以下JSON格式之一：
 格式1 (调用工具): {{"tool_call": {{...}}}} 或 {{"tool_calls": [{{...}}, {{...}}]}}
 格式2 (直接回复/提问): {{"response": "..."}}
+否则视为无效，绝不允许其它字段。
 """
     # 消融实验对应的prompt
 #     decision_prompt_text = f"""
@@ -184,69 +192,85 @@ async def run_planner(state: AgentState, llm, tools_config: dict, user_habits: d
 
     # --- 5. 统一处理 LLM 的 JSON 输出 (逻辑不变) ---
     response_str = response.content
+    print("planner:", response_str)
     json_str = None
-    # 优先寻找被 ```json ... ``` 包围的代码块
+    # json_str 的提取逻辑保持不变
     match = re.search(r"```json\s*(\{[\s\S]*?\})\s*```", response_str, re.DOTALL)
-    if match:
-        json_str = match.group(1)
-        log_message("Found JSON within a markdown code block.")
+    if match: json_str = match.group(1)
     else:
-        # 如果没有找到代码块，则尝试从字符串中提取第一个有效的JSON对象
-        # 这对于处理不带markdown标记的纯JSON输出很有用
         match = re.search(r'\{[\s\S]*\}', response_str)
-        if match:
-            json_str = match.group(0)
-            log_message("Found JSON directly in the response string.")
+        if match: json_str = match.group(0)
 
-    # 如果两种方法都找不到JSON，则将整个响应视为直接回复
     if not json_str:
         log_message("No JSON object found in the response. Treating as a direct reply.")
         state['messages'].append(AIMessage(content=response_str))
-        state['log'].append("Planner node finished (direct reply).")
         return state
     
-    # --- 开始解析提取出的 JSON 字符串 ---
     try:
         parsed_response = json.loads(json_str)
         
-        if "tool_call" in parsed_response or "tool_calls" in parsed_response:
-            raw_tool_calls = parsed_response.get("tool_call") or parsed_response.get("tool_calls")
-            
-            if not isinstance(raw_tool_calls, list):
-                raw_tool_calls = [raw_tool_calls]
-            
-            valid_tool_calls = []
-            for tool_call in raw_tool_calls:
-                if not isinstance(tool_call, dict):
-                    log_message(f"Skipping invalid tool call item: {tool_call}")
-                    continue
-                
-                formatted_call = {
-                    "name": tool_call.get("name") or tool_call.get("tool_name"),
-                    "args": tool_call.get("args") or tool_call.get("parameters") or {},
-                    "id": tool_call.get("id", f"tool_call_{len(state['messages'])}_{len(valid_tool_calls)}")
-                }
-                valid_tool_calls.append(formatted_call)
-            
-            if valid_tool_calls:
-                log_message(f"Planner decided to call tools: {valid_tool_calls}")
-                state['messages'].append(AIMessage(content="", tool_calls=valid_tool_calls))
-            else:
-                log_message(f"Planner found 'tool_call' key but failed to parse any valid tools. Raw: {raw_tool_calls}")
-                state['messages'].append(AIMessage(content="我试图调用一个工具，但收到了无法解析的指令。"))
+        valid_tool_calls = []
+        action_taken = False
 
+        # --- 决策逻辑：按优先级顺序检查所有可能的格式 ---
+
+        # 优先级 1: 检查标准 'tool_call' 或 'tool_calls'
+        if "tool_call" in parsed_response or "tool_calls" in parsed_response:
+            action_taken = True
+            raw_tool_calls = parsed_response.get("tool_call") or parsed_response.get("tool_calls")
+            if not isinstance(raw_tool_calls, list): raw_tool_calls = [raw_tool_calls]
+            for tool_call in raw_tool_calls:
+                # 标准校验逻辑
+                if isinstance(tool_call, dict) and isinstance(tool_call.get("name"), str):
+                    valid_tool_calls.append({ "name": tool_call["name"], "args": tool_call.get("args") or {}, "id": tool_call.get("id", f"tool_call_{len(state['messages'])}_{len(valid_tool_calls)}") })
+
+        # 优先级 2: 检查 'tool_code' 格式
+        elif "tool_code" in parsed_response:
+            action_taken = True
+            # ast解析逻辑
+            try:
+                code_str = parsed_response['tool_code']
+                if code_str.strip().startswith("print("): code_str = code_str.strip()[6:-1]
+                tree = ast.parse(code_str)
+                call_node = tree.body[0].value
+                if isinstance(call_node, ast.Call):
+                    tool_name = getattr(call_node.func, 'attr', getattr(call_node.func, 'id', None))
+                    if tool_name:
+                        args = {kw.arg: ast.literal_eval(kw.value) for kw in call_node.keywords}
+                        valid_tool_calls.append({ "name": tool_name, "args": args, "id": f"tool_call_{len(state['messages'])}_parsed" })
+            except Exception as e:
+                log_message(f"Failed to parse 'tool_code': {e}")
+                state['messages'].append(AIMessage(content=f"收到了无法解析的工具代码: `{parsed_response['tool_code']}`"))
+
+        # 【核心修复】优先级 3: 检查“裸露”的工具调用格式
+        elif isinstance(parsed_response, dict) and "name" in parsed_response and "args" in parsed_response:
+            action_taken = True
+            log_message("Detected and correcting a 'naked' tool call object.")
+            tool_name = parsed_response.get("name")
+            if tool_name and isinstance(tool_name, str):
+                valid_tool_calls.append({
+                    "name": tool_name,
+                    "args": parsed_response.get("args") or {},
+                    "id": parsed_response.get("id", f"tool_call_{len(state['messages'])}_naked")
+                })
+
+        # 优先级 4: 检查 'response'
         elif "response" in parsed_response:
+            action_taken = True
             log_message(f"Planner decided to respond directly: {parsed_response['response']}")
             state['messages'].append(AIMessage(content=parsed_response['response']))
-        else:
+
+        # --- 统一处理最终结果 ---
+        if valid_tool_calls:
+            log_message(f"Planner decided to call tools: {valid_tool_calls}")
+            state['messages'].append(AIMessage(content="", tool_calls=valid_tool_calls))
+        elif not action_taken:
+            # 如果所有检查都失败了，这才是真正的“意外结构”
             log_message(f"Planner returned unexpected JSON structure: {json_str}")
-            # 如果JSON结构不符合预期，返回整个JSON作为内容，方便调试
             state['messages'].append(AIMessage(content=f"收到了意外的规划结果: ```json\n{json_str}\n```"))
 
     except json.JSONDecodeError:
-        log_message(f"Failed to decode JSON. The LLM response might be a mix of text and malformed JSON. Raw response: {response_str}")
-        # 如果JSON解析失败，说明LLM的输出既不是标准JSON，也不是纯文本
-        # 此时，将原始、未裁剪的完整回复返回给用户是最好的选择
+        log_message(f"Failed to decode JSON. Raw response: {response_str}")
         state['messages'].append(AIMessage(content=response_str))
     
     state['log'].append("Planner node finished.")
