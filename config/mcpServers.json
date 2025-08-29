@@ -39,16 +39,6 @@
       "env": {
         "MEMORY_FILE_PATH": "E:/人机交互/CHI2026/CogAgent/CogAgent/memory/memory.json"
       }
-    },
-
-    "universal-email": {
-      "command": "node",
-      "args": ["config/mcptools/email-mcp/index.js"],
-      "env": {
-        "EMAIL_USER": "2052744478@qq.com",
-        "EMAIL_PASSWORD": "sycjcwnupgeuchbh",
-        "EMAIL_TYPE": "auto"
-      }
     }
     
   }
