@@ -8,6 +8,7 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@2.3.6/dist/purify.min.js"></script>
     <style>
+        /* 页面布局和基本样式 */
         body, html { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
         .app-layout { display: flex; height: 100vh; }
         .main-content { flex-grow: 1; display: flex; flex-direction: column; background-color: #f4f7f9; }
@@ -16,69 +17,83 @@
         .chart-title { font-size: 1.2em; font-weight: 600; margin-bottom: 1vw; color: #333; flex-shrink: 0; }
         .chart-placeholder { flex-grow: 1; position: relative; height: 80%; }
 
+        /* 聊天界面样式 */
         .chat-interface-container { position: relative; display: flex; flex-direction: column; flex-grow: 1; height: 0; }
-        .conversation-log { flex-grow: 1; overflow-y: auto; padding: 2vw; }
-        .message-row { display: flex; margin-bottom: 1vw; }
-        .message-bubble { max-width: 70%; padding: 1vw 1.5vw; border-radius: 1.8vw; line-height: 1.5; word-wrap: break-word; }
-        .user-bubble { background-color: #007bff; color: white; border-bottom-right-radius: 0.4vw; }
-        .reactive_agent-bubble { background-color: #f1f0f0; color: black; border-bottom-left-radius: 0.4vw; }
-        .proactive_agent-bubble { background-color: #fffbe6; color: #8a6d3b; border: 0.1vw solid #ffeeba; font-size: 1em; }
+        .conversation-log { flex-grow: 1; overflow-y: auto; padding: 20px; }
+        .message-row { display: flex; margin-bottom: 12px; }
+        .user-row { justify-content: flex-end; }
+        .system-row { justify-content: center; } /* System messages centered */
+        .reactive_agent-row, .proactive_agent-row { justify-content: flex-start; }
+        .message-bubble { max-width: 70%; padding: 10px 15px; border-radius: 18px; line-height: 1.5; word-wrap: break-word; }
+        .user-bubble { background-color: #007bff; color: white; border-bottom-right-radius: 4px; }
+        .reactive_agent-bubble { background-color: #f1f0f0; color: black; border-bottom-left-radius: 4px; }
+        .proactive_agent-bubble { background-color: #e6f7ff; color: #0056b3; border: 1px solid #91d5ff; font-size: 14px; }
+        .system-bubble { background-color: #f8f9fa; color: #6c757d; border: 1px solid #dee2e6; font-size: 13px; font-style: italic; text-align: center; }
+        
+        /* 输入区域 */
+        .input-area-container { padding: 15px 20px; border-top: 1px solid #e0e0e0; background-color: white; }
+        .input-elements-wrapper { display: flex; align-items: center; gap: 10px; }
+        #command-input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 20px; resize: none; font-size: 16px; }
+        #send-button, #file-upload-button { background: none; border: none; cursor: pointer; padding: 5px; display: flex; align-items: center; }
+        .send-icon { width: 24px; height: 24px; color: #007bff; }
+        .upload-icon { width: 22px; height: 22px; color: #6c757d; }
+        #file-upload-status { font-size: 12px; color: #007bff; margin-top: 5px; height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .footer-text { font-size: 12px; color: #aaa; text-align: center; margin-top: 10px; }
 
-        .input-area-container { padding: 1.5vw 2vw; border-top: 1px solid #e0e0e0; background-color: white; }
-        .input-elements-wrapper { display: flex; align-items: center; gap: 1vw; }
-        #command-input { flex-grow: 1; padding: 1vw; border: 1px solid #ccc; border-radius: 2vw; resize: none; font-size: 1em; }
-        #send-button, #file-upload-button { background: none; border: none; cursor: pointer; padding: 0.5vw; display: flex; align-items: center; }
-        .send-icon { width: 2vw; height: 2vw; color: #007bff; }
-        .upload-icon { width: 2vw; height: 2vw; color: #6c757d; }
-        #file-upload-status { font-size: 0.9em; color: #007bff; margin-top: 0.5vw; height: 1.6vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .footer-text { font-size: 0.9em; color: #aaa; text-align: center; margin-top: 1vw; }
-
-        .confirmation-banner { padding: 1.2vw; background-color: #e6f7ff; border-top: 1px solid #91d5ff; text-align: center; position: sticky; bottom: 10vh; z-index: 100; }
+        /* 确认横幅 */
+        .confirmation-banner { padding: 12px; background-color: #e6f7ff; border-top: 1px solid #91d5ff; text-align: center; position: sticky; bottom: 100px; z-index: 100; }
         .confirmation-banner.hidden { display: none; }
-        .confirmation-banner button { margin-left: 1.5vw; padding: 0.6vw 1.2vw; border-radius: 0.5vw; cursor: pointer; font-weight: bold; }
+        .confirmation-banner button { margin-left: 15px; padding: 6px 12px; border-radius: 5px; cursor: pointer; font-weight: bold; }
         #confirm-yes { background-color: #28a745; color: white; border: none; }
         #confirm-no { background-color: #dc3545; color: white; border: none; }
 
-        #new-chat-button { position: absolute; top: 1.5vw; left: 2vw; z-index: 10; padding: 0.8vw 1.5vw; font-size: 1em; font-weight: bold; color: #007bff; background-color: white; border: 0.1vw solid #dee2e6; border-radius: 2vw; cursor: pointer; transition: all 0.2s ease-in-out; box-shadow: 0 0.2vw 0.4vw rgba(0,0,0,0.05); }
+        /* 顶部按钮 */
+        #new-chat-button { position: absolute; top: 15px; left: 20px; z-index: 10; padding: 8px 15px; font-size: 14px; font-weight: bold; color: #007bff; background-color: white; border: 1px solid #dee2e6; border-radius: 20px; cursor: pointer; transition: all 0.2s ease-in-out; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         #new-chat-button:hover { background-color: #007bff; color: white; border-color: #007bff; }
+        #manual-assist-button { position: absolute; top: 15px; right: 20px; z-index: 10; padding: 8px; color: #6c757d; background-color: white; border: 1px solid #dee2e6; border-radius: 50%; cursor: pointer; width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease-in-out; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        #manual-assist-button:hover { color: #dc3545; border-color: #dc3545; }
+        .help-icon { width: 24px; height: 24px; }
 
-        .message-bubble img { max-width: 100%; border-radius: 1vw; margin-top: 0.8vw; }
-        .attachment-info { color: #d7d7d7 !important; font-style: italic; font-size: 0.9em; display: block; margin-top: 0.5vw; }
-
-        #line-chart-card {
-            flex-basis: 60%;
-            flex-grow: 1;
-            min-width: 0;
-            max-width: 50vw;
-            display: flex;
-            flex-direction: column;
+        /* 消息内元素 */
+        .message-bubble {
+            max-width: 70%;
+            padding: 10px 15px;
+            border-radius: 18px;
+            line-height: 1.5;
+            word-wrap: break-word;
+            font-size: 1.1em; /* 使用相对大小 */
         }
-        #pie-chart-card {
-            flex-basis: 40%;
-            flex-shrink: 0;
-            min-width: 0;
+        .message-bubble img { max-width: 100%; border-radius: 10px; margin-top: 8px; }
+        .attachment-info { color: #a9a9a9 !important; font-style: italic; font-size: 0.9em; display: block; margin-top: 5px; }
+        
+        .chart-card:first-child {
+            flex-basis: 65%;
+            flex-grow: 1;
             max-width: 50vw;
-            display: flex;
-            flex-direction: column;
+        }
+        .chart-card:last-child {
+            flex-basis: 35%;
+            flex-shrink: 0;
+            max-width: 50vw;
         }
 
         .message-bubble code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background-color: #e9ecef; padding: 0.2vw 0.5vw; border-radius: 0.4vw; }
         .message-bubble pre { background-color: #282c34; color: #abb2bf; padding: 1.5vw; border-radius: 0.8vw; margin-top: 1vw; margin-bottom: 0.5vw; overflow-x: auto; white-space: pre; }
         .message-bubble pre code { background-color: transparent; padding: 0; color: inherit; }
+
     </style>
 </head>
 <body>
     <div class="app-layout">
         <main class="main-content">
             <div id="dashboard-container" class="dashboard-container">
-                <div class="chart-card" id="line-chart-card">
+                <div class="chart-card">
                     <div class="chart-title">用户认知负荷变化</div>
                     <div class="chart-placeholder">
-                        <!-- 2. 用 canvas 替换占位符 div -->
                         <canvas id="cognitiveLoadChart"></canvas>
                     </div>
                 </div>
-                <div class="chart-card" id="pie-chart-card">
+                <div class="chart-card">
                     <div class="chart-title">会话认知负荷分布</div>
                     <div class="chart-placeholder">
                         <canvas id="cognitiveLoadDistributionChart"></canvas>
@@ -87,6 +102,11 @@
             </div>
             <div class="chat-interface-container">
                 <button id="new-chat-button">⊕ 新建对话</button>
+                <button id="manual-assist-button" title="需要帮助">
+                    <svg class="help-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                        <path fill-rule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zM12 8.25a.75.75 0 01.75.75v3.75a.75.75 0 01-1.5 0V9a.75.75 0 01.75-.75zm0 8.25a.75.75 0 100-1.5.75.75 0 000 1.5z" clip-rule="evenodd" />
+                    </svg>
+                </button>
                 <div id="conversation-log" class="conversation-log"></div>
                 <div id="confirmation-banner" class="confirmation-banner hidden">
                     <span id="confirmation-text"></span>
@@ -101,7 +121,6 @@
                             </svg>
                         </button>
                         <input type="file" id="file-input" style="display: none;">
-                        
                         <div class="main-input-group" style="flex-grow: 1;">
                             <textarea id="command-input" placeholder="输入消息，或点击左侧回形针上传文件..." rows="1"></textarea>
                         </div>
@@ -129,6 +148,7 @@
             const confirmYesBtn = document.getElementById("confirm-yes");
             const confirmNoBtn = document.getElementById("confirm-no");
             const newChatButton = document.getElementById("new-chat-button");
+            const manualAssistButton = document.getElementById("manual-assist-button");
             const fileInput = document.getElementById("file-input");
             const fileUploadStatus = document.getElementById("file-upload-status");
             const fileUploadButton = document.getElementById("file-upload-button");
@@ -167,36 +187,6 @@
                 const dirtyHtml = marked.parse(textContent, { breaks: true, gfm: true }); // breaks: true 让换行符变成 <br>, gfm: true 启用GitHub风格的Markdown
                 contentContainer.innerHTML = dirtyHtml;
                 messageBubble.appendChild(contentContainer);
-
-                // // 将传入的纯文本内容（textContent）进行处理和渲染
-                // // 现在的textContent不包含附件信息了
-                // const parts = [];
-                // let lastIndex = 0;
-                // const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
-                // let match;
-                // while ((match = codeBlockRegex.exec(textContent)) !== null) {
-                //     if (match.index > lastIndex) {
-                //         parts.push({ type: "text", content: textContent.slice(lastIndex, match.index) });
-                //     }
-                //     parts.push({ type: "code", lang: match[1] || "", content: match[2] });
-                //     lastIndex = codeBlockRegex.lastIndex;
-                // }
-                // if (lastIndex < textContent.length) {
-                //     parts.push({ type: "text", content: textContent.slice(lastIndex) });
-                // }
-
-                // for (const part of parts) {
-                //     if (part.type === "code") {
-                //         const codeElem = document.createElement("pre");
-                //         codeElem.innerHTML = `<code class="language-${part.lang}">${escapeHtml(part.content)}</code>`;
-                //         messageBubble.appendChild(codeElem);
-                //     } else {
-                //         const contentSpan = document.createElement("span");
-                //         // 只对文本部分进行换行处理
-                //         contentSpan.innerHTML = escapeHtml(part.content).replace(/\n/g, "<br>");
-                //         messageBubble.appendChild(contentSpan);
-                //     }
-                // }
 
                 // --- 新增逻辑：独立渲染附件信息 ---
                 if (attachmentInfo && attachmentInfo.name) {
@@ -499,53 +489,51 @@
                     commandInput.focus();
                 }
             }
-            // --- 核心功能：处理用户对主动服务的确认 ---
-            confirmYesBtn.addEventListener("click", async function() {
-                if (inquiryTimeoutId) clearTimeout(inquiryTimeoutId); // 清除计时器
-                inquiryTimeoutId = null;
 
+            // --- 核心功能：处理主动服务响应 ---
+            confirmYesBtn.addEventListener("click", async function() {
+                if (inquiryTimeoutId) clearTimeout(inquiryTimeoutId);
+                inquiryTimeoutId = null;
                 if (!currentAssistanceRequestId) return;
                 confirmationBanner.classList.add("hidden");
-
                 appendMessage("You", "是的，请帮助我。");
-                appendMessage("Agent (Proactive)", "好的，正在为您分析情况...");
                 try {
-                    const response = await fetch("/request_assistance", { 
+                    const response = await fetch("/request_assistance", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ 
-                            request_id: currentAssistanceRequestId,
-                            session_id: sessionId // <-- 将主会话ID发回
-                        })
+                        body: JSON.stringify({ request_id: currentAssistanceRequestId, session_id: sessionId })
                     });
-
-                    if (!response.ok) { const errorData = await response.json(); throw new Error(errorData.error || "Server error"); }
-                    
+                    if (!response.ok) { const err = await response.json(); throw new Error(err.error); }
                     const data = await response.json();
-                    // 1. 如果有分析消息，先显示它
-                    if (data.analysis_message) {
-                        appendMessage("Agent (Proactive)", data.analysis_message);
-                    }
-                    // 2. 然后显示主动服务的响应
-                    if (data.response) {
-                        appendMessage("Agent", data.response);
-                    }
-                } catch (error) {
-                    appendMessage("System Error", error.message);
-                } finally {
-                    currentAssistanceRequestId = null;
-                }
+                    if (data.analysis_message) appendMessage("Agent (Proactive)", data.analysis_message);
+                    if (data.final_response) appendMessage("Agent", data.final_response);
+                } catch (error) { appendMessage("System Error", error.message); } 
+                finally { currentAssistanceRequestId = null; }
             });
 
             confirmNoBtn.addEventListener("click", function() {
-                if (inquiryTimeoutId) clearTimeout(inquiryTimeoutId); // 清除计时器
+                if (inquiryTimeoutId) clearTimeout(inquiryTimeoutId);
                 inquiryTimeoutId = null;
-
                 confirmationBanner.classList.add("hidden");
-
                 appendMessage("You", "不了，谢谢。");
                 appendMessage("Agent (Proactive)", "好的，如果您需要帮助，可以随时向我提问。");
                 currentAssistanceRequestId = null;
+            });
+
+            // --- 核心功能：手动求助 ---
+            manualAssistButton.addEventListener("click", async function() {
+                appendMessage("You", "我好像卡住了，能帮我看看吗？");
+                try {
+                    const response = await fetch("/manual_trigger_assistance", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ session_id: sessionId })
+                    });
+                    if (!response.ok) { const err = await response.json(); throw new Error(err.error); }
+                    const data = await response.json();
+                    if (data.analysis_message) appendMessage("Agent (Proactive)", data.analysis_message);
+                    if (data.final_response) appendMessage("Agent", data.final_response);
+                } catch (error) { appendMessage("System Error", "请求帮助时发生错误: " + error.message); }
             });
 
             // --- 核心功能：监听来自服务器的 Server-Sent Events ---

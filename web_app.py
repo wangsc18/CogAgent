@@ -23,6 +23,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = current_dir
 sys.path.append(project_root)
 
+from datetime import datetime
 from state import AgentState
 from agents.planner import run_planner
 from agents.tool_manager import run_tool_manager
@@ -32,7 +33,7 @@ from proactive_service import proactive_monitoring_loop
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from utils.mcp_config_loader import load_mcp_servers_config
-from utils.helpers import setup_logging, load_user_habits, log_message
+from utils.helpers import setup_logging, load_user_habits, log_message, get_real_time_user_activity
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -353,6 +354,80 @@ async def request_assistance():
                 "analysis_message": f"系统分析完成，正在执行建议...\n\n---\n{analysis_result['suggestion_text']}\n理由: {analysis_result['reasoning']}",
                 "response": final_state['messages'][-1].content
             })
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"An error occurred: {e}"}), 500
+
+@app.route('/manual_trigger_assistance', methods=['POST'])
+async def manual_trigger_assistance():
+    """
+    【新版】手动触发主动服务，跳过询问，直接进行分析和行动。
+    """
+    if not core_agent_app:
+        return jsonify({"error": "Agent is not ready."}), 503
+    
+    try:
+        # 1. 获取会话ID
+        data = await request.get_json()
+        session_id = data.get('session_id')
+        if not session_id:
+            return jsonify({"error": "No session ID provided."}), 400
+
+        log_message(f"--- User manually triggered DIRECT assistance for session: {session_id} ---")
+
+        # 2. 立即获取当前的用户活动状态，以构建上下文
+        current_activity = await asyncio.to_thread(get_real_time_user_activity)
+        
+        # 3. 手动构建一个用于分析的上下文(context)
+        context_to_analyze = {
+            "reason": "用户手动点击了“我需要帮助”按钮，请求直接分析当前情况。",
+            "activity_summary": {
+                "proactive_score": "N/A (Manual Trigger)",
+                "avg_keyboard_hz": current_activity.get("keyboard_freq_hz", 0),
+                "avg_mouse_hz": current_activity.get("mouse_freq_hz", 0),
+                "changed_windows_count": len(current_activity.get("window_titles", [])),
+                "final_cognitive_load": current_activity.get("cognitive_load", "unknown"),
+                "final_confidence": current_activity.get("confidence", 0.0),
+                "window_titles": current_activity.get("window_titles", [])
+            },
+            "activity_log": [{"timestamp": datetime.now().isoformat(), "activity": current_activity}]
+        }
+
+        # 4. 【核心】直接调用 Analyzer Agent (UserStateModeler) 进行分析
+        analysis_result = await UserStateModeler.analyze_user_context_and_suggest(
+            context=context_to_analyze,
+            llm=llm,
+            tools_config=tools_config
+        )
+
+        if not analysis_result or (analysis_result.get("recommended_tool") is None and not analysis_result.get("suggestion_text")):
+            # 如果分析失败或没有任何建议
+            error_msg = analysis_result.get("suggestion_text", "分析失败，无法提供建议。")
+            return jsonify({"analysis_message": "系统分析完成。", "final_response": error_msg})
+
+        # 5. 构建 Handoff 消息并送入主工作流 (与 /request_assistance 路由后半部分完全相同)
+        handoff_prompt = f"""
+用户刚刚手动请求了帮助。我的主动式助理分析了用户当前的情况，并给出了以下建议：
+
+- **它认为我正在做**: {analysis_result['user_intent']}
+- **它建议的操作**: {analysis_result['suggestion_text']}
+- **它建议使用的工具**: `{analysis_result.get('recommended_tool', '无')}`
+- **理由**: {analysis_result['reasoning']}
+
+请根据这个建议继续操作。
+"""
+        state = await get_session_state(session_id)
+        state['messages'].append(HumanMessage(content=handoff_prompt))
+        
+        final_state = await core_agent_app.ainvoke(state, {"recursion_limit": 10})
+        await save_session_state(session_id, final_state)
+
+        # 6. 返回分析消息和最终执行结果
+        return jsonify({
+            "analysis_message": f"系统分析完成: {analysis_result['suggestion_text']}",
+            "final_response": final_state['messages'][-1].content
+        })
 
     except Exception as e:
         traceback.print_exc()

@@ -23,7 +23,7 @@ class UserStateModeler:
             "flow_signal": 0.5, # “心流”状态下的惩罚乘数
             "window_switch": 0.4 # “分心信号”（窗口切换）的权重
         }
-        self.proactive_threshold = 100 # 阈值
+        self.proactive_threshold = 1000 # 阈值
 
     def log_current_state_from_data(self, activity: dict):
         """从外部接收活动数据并记录。"""
