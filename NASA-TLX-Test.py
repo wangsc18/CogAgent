@@ -258,6 +258,9 @@ class NasaTlxUeqApp:
         tlx_weighted_sum = sum(self.tlx_ratings_vars[key].get() * self.tlx_weights[key] for key in NASA_DIMENSIONS)
         final_tlx_score = tlx_weighted_sum / 15 if sum(self.tlx_weights.values()) > 0 else 0
 
+        # 新增：收集每个维度的原始分数
+        tlx_raw_scores = {key: self.tlx_ratings_vars[key].get() for key in NASA_DIMENSIONS}
+
         ueq_data_row = self.get_formatted_ueq_data()
         
         participant_id = self.participant_id_var.get()
@@ -265,12 +268,15 @@ class NasaTlxUeqApp:
         
         try:
             with open("assessment_results_summary.txt", "a", encoding="utf-8") as f:
-                # ... (文件写入逻辑不变) ...
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 f.write("=================================================\n")
                 f.write(f"评估时间: {timestamp}\n")
                 f.write(f"被试 ID: {participant_id}\n")
                 f.write(f"系统条件: {system_condition}\n")
+                f.write("-------------------------------------------------\n")
+                f.write("NASA-TLX 各维度原始分数:\n")
+                for key, value in NASA_DIMENSIONS.items():
+                    f.write(f"{value['name']}: {tlx_raw_scores[key]}\n")
                 f.write("-------------------------------------------------\n")
                 f.write(f"最终加权工作负荷分数 (TLX Score): {final_tlx_score:.2f}\n")
                 f.write("-------------------------------------------------\n")
@@ -282,13 +288,13 @@ class NasaTlxUeqApp:
             try:
                 with open(csv_file, 'x', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
-                    writer.writerow(['Participant_ID', 'System_Condition'] + UEQ_CSV_HEADER)
+                    writer.writerow(['Participant_ID', 'System_Condition', 'TLX_Score'] + UEQ_CSV_HEADER)
             except FileExistsError:
                 pass
 
             with open(csv_file, "a", newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                writer.writerow([participant_id, system_condition] + ueq_data_row)
+                writer.writerow([participant_id, system_condition, f"{final_tlx_score:.2f}"] + ueq_data_row)
             
             save_confirmation = "\n结果已成功保存到 .txt 和 .csv 文件中。"
 
