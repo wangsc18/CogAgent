@@ -1,45 +1,6 @@
 {
   "mcpServers": {
 
-    "mcp-server-chart": {
-      "command": "cmd",
-      "args": [
-        "/c",
-        "npx",
-        "-y",
-        "@antv/mcp-server-chart"
-      ]
-    },
-
-    "exa": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@smithery/cli@latest",
-        "run",
-        "exa",
-        "--key",
-        "b624ec50-9b19-4cd0-95e7-e0c3ad02d0af",
-        "--profile",
-        "cognitive-cicada-puOJmZ"
-      ]
-    },
-
-    "notionMCP": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "https://mcp.notion.com/mcp"]
-    },
-
-    "memory": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-memory"
-      ],
-      "env": {
-        "MEMORY_FILE_PATH": "E:/人机交互/CHI2026/CogAgent/CogAgent/memory/memory.json"
-      }
-    }
     
   }
 }
