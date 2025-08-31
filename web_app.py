@@ -327,9 +327,13 @@ async def request_assistance():
             tools_config=tools_config # 传递可用的工具
         )
 
-        if not analysis_result.get("recommended_tool"):
-            # 如果分析失败或没有建议，直接返回错误信息
-            return jsonify({"response": analysis_result.get("suggestion_text", "分析失败，无法提供建议。")})
+        # 如果分析失败或没有建议，也返回一个完整的结构
+        if not analysis_result or (not analysis_result.get("recommended_tool") and not analysis_result.get("suggestion_text")):
+            error_msg = analysis_result.get("suggestion_text", "分析失败，无法提供建议。")
+            return jsonify({
+                "analysis_message": "系统分析完成。",
+                "response": error_msg
+            })
         
         # 2. 基于分析结果，构建一个清晰的 "Handoff" 消息给主Agent
         handoff_prompt = f"""
@@ -351,7 +355,7 @@ async def request_assistance():
         await save_session_state(session_id, final_state)
 
         return jsonify({
-                "analysis_message": f"系统分析完成，正在执行建议...\n\n---\n{analysis_result['suggestion_text']}\n理由: {analysis_result['reasoning']}",
+                "analysis_message": f"系统分析完成，建议: {analysis_result['suggestion_text']}\n理由: {analysis_result['reasoning']}",
                 "response": final_state['messages'][-1].content
             })
 
@@ -425,7 +429,7 @@ async def manual_trigger_assistance():
 
         # 6. 返回分析消息和最终执行结果
         return jsonify({
-            "analysis_message": f"系统分析完成: {analysis_result['suggestion_text']}",
+            "analysis_message": f"系统分析完成，建议: {analysis_result['suggestion_text']}\n理由: {analysis_result['reasoning']}",
             "final_response": final_state['messages'][-1].content
         })
 

@@ -506,7 +506,7 @@
                     if (!response.ok) { const err = await response.json(); throw new Error(err.error); }
                     const data = await response.json();
                     if (data.analysis_message) appendMessage("Agent (Proactive)", data.analysis_message);
-                    if (data.final_response) appendMessage("Agent", data.final_response);
+                    if (data.response) appendMessage("Agent", data.response);
                 } catch (error) { appendMessage("System Error", error.message); } 
                 finally { currentAssistanceRequestId = null; }
             });
