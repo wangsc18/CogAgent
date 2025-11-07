@@ -11,10 +11,16 @@ UPDATE_INTERVAL_SECONDS = 5
 # 【核心修复】创建一个全局标志来跟踪监控器是否已启动
 _monitors_started = False
 
-async def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache):
+async def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache, llm=None, decision_mode="llm"):
     """
     监控循环。
-    使用全局标志来确保监控器只被启动一次。
+
+    Args:
+        sessions_dict: 会话字典
+        msg_queue: 消息队列
+        request_cache: 请求缓存
+        llm: LangChain LLM实例，用于LLM决策模式
+        decision_mode: 决策模式 "heuristic" 或 "llm" (默认: "llm")
     """
     global _monitors_started # 声明我们要修改的是全局变量
 
@@ -34,8 +40,15 @@ async def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache):
             # 如果监控器启动失败，这个后台任务就没有意义了，直接退出。
             return
 
-    modeler = UserStateModeler(observation_period_seconds=30, history_limit=6)
-    
+    # 创建用户状态建模器，传递LLM和决策模式
+    log_message(f"--- Initializing UserStateModeler with decision_mode={decision_mode} ---")
+    modeler = UserStateModeler(
+        observation_period_seconds=30,
+        history_limit=6,
+        llm=llm,
+        decision_mode=decision_mode
+    )
+
     print(f"--- Proactive Service Thread Started. Updating state every {UPDATE_INTERVAL_SECONDS}s. ---")
     
     while True:

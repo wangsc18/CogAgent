@@ -8,6 +8,7 @@ import asyncio
 import tempfile
 import threading
 import traceback
+import io
 from functools import partial
 from quart import Quart, render_template, request, jsonify, Response
 from langchain_openai import AzureChatOpenAI, ChatOpenAI
@@ -17,6 +18,7 @@ from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, System
 from utils.activity_monitor import monitor
 from utils.face_thread import visual_detector
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
+from PIL import Image
 
 # --- 路径和模块导入 ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -33,17 +35,19 @@ from proactive_service import proactive_monitoring_loop
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from utils.mcp_config_loader import load_mcp_servers_config
-from utils.helpers import setup_logging, load_user_habits, log_message, get_real_time_user_activity
+from utils.helpers import setup_logging, load_user_habits, log_message, get_real_time_user_activity, optimize_image_for_llm
 
 from dotenv import load_dotenv
 load_dotenv()
 
 # --- 全局变量 ---
-llm = None  # <--- 将llm设为全局变量
+llm = None  # <--- 将llm设为全局变量（向后兼容，指向主模型）
+llm_pro = None  # <--- Pro模型（gemini-2.5-pro）用于复杂推理
+llm_flash = None  # <--- Flash模型（gemini-2.0-flash）用于高频任务
 tools_config = {} # <--- 将tools_config设为全局变量
 executable_tools = {} # <--- 将executable_tools设为全局变量
 core_agent_app = None
-memory_agent = None
+memory_agent_app = None
 SESSIONS = {}
 message_queue = asyncio.Queue()
 pending_assistance_requests = {}
@@ -64,7 +68,7 @@ def dict_to_message(data: dict) -> BaseMessage:
 
 # --- 初始化函数 ---
 def initialize_system():
-    global core_agent_app, memory_agent_app, llm, tools_config, executable_tools
+    global core_agent_app, memory_agent_app, llm, llm_pro, llm_flash, tools_config, executable_tools
     print("--- System Initializing ---")
     if not os.path.exists(SESSIONS_DIR):
         os.makedirs(SESSIONS_DIR)
@@ -84,19 +88,31 @@ def initialize_system():
     tools_config = {tool.name: {"description": tool.description, "args_schema": tool.args_schema} for tool in discovered_tools}
     executable_tools = {tool.name: tool for tool in discovered_tools}
 
-    # llm = AzureChatOpenAI(
-    #     temperature=0,
-    #     # AzureChatOpenAI 会自动从环境变量读取这些值，但显式传递更清晰
-    #     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-    #     api_version=os.getenv("OPENAI_API_VERSION"),
-    #     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    #     azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"), 
-    # )
-    llm = ChatOpenAI(model='gemini-2.5-pro', temperature=0)
+    # === 多模型配置策略 ===
+    # 根据agent的任务特点，使用不同性能的模型以优化响应速度和成本
+
+    # 1. 主LLM (gemini-2.5-pro) - 用于复杂推理任务
+    #    - Planner: 需要高级ToM推理
+    #    - 认知效益分析: 需要多模态分析
+    llm_pro = ChatOpenAI(model='gemini-2.5-pro', temperature=0)
+
+    # 2. 快速LLM (gemini-2.0-flash) - 用于高频/简单任务
+    #    - LLM状态决策: 每30秒调用，纯文本，结构化输出
+    #    - Memory Agent: 极低频，总结任务
+    llm_flash = ChatOpenAI(model='gemini-2.0-flash', temperature=0)
+
+    # 向后兼容：全局llm指向主模型
+    llm = llm_pro
+
+    print(f"--- Models Configured ---")
+    print(f"  Pro Model (complex reasoning): gemini-2.5-pro")
+    print(f"  Flash Model (high-frequency tasks): gemini-2.0-flash")
 
     user_habits = load_user_habits()
     workflow = StateGraph(AgentState)
-    planner_node = partial(run_planner, llm=llm, tools_config=tools_config, user_habits=user_habits, executable_tools=executable_tools)
+
+    # Planner使用Pro模型（需要复杂推理）
+    planner_node = partial(run_planner, llm=llm_pro, tools_config=tools_config, user_habits=user_habits, executable_tools=executable_tools)
     tool_manager_node = partial(run_tool_manager, executable_tools=executable_tools)
     workflow.add_node("planner", planner_node)
     workflow.add_node("tool_manager", tool_manager_node)
@@ -122,8 +138,9 @@ def initialize_system():
         "read_graph", "search_nodes", "open_nodes"
     ]
     memory_tools_config = {name: tools_config[name] for name in memory_tool_names if name in tools_config}
-    
-    memory_agent_node = partial(run_memory_agent, llm=llm, tools_config=memory_tools_config)
+
+    # Memory Agent使用Flash模型（极低频，总结任务）
+    memory_agent_node = partial(run_memory_agent, llm=llm_flash, tools_config=memory_tools_config)
     
     # 记忆Agent只需要两个节点：提炼节点 和 执行所有工具的节点
     memory_workflow.add_node("memory_agent", memory_agent_node)
@@ -205,11 +222,18 @@ app = Quart(__name__)
 @app.before_serving
 async def startup_background_tasks():
     print("--- Starting background tasks ---")
+
+    # 从环境变量读取决策模式配置，默认使用LLM模式
+    decision_mode = os.getenv("PROACTIVE_DECISION_MODE", "llm")  # "llm" 或 "heuristic"
+
+    # 主动服务使用Flash模型（高频调用，每30秒一次状态判断）
     app.add_background_task(
         proactive_monitoring_loop,
         sessions_dict=SESSIONS,
         msg_queue=message_queue,
-        request_cache=pending_assistance_requests
+        request_cache=pending_assistance_requests,
+        llm=llm_flash,  # 使用Flash模型进行快速状态决策
+        decision_mode=decision_mode
     )
     
 # --- 路由定义 ---
@@ -231,11 +255,34 @@ async def chat():
         if file_data and file_data.get('type') == 'image':
             # --- 场景一：附件是图片（来自粘贴） ---
             print("Processing a pasted image...")
-            multimodal_content = [
-                {"type": "text", "text": user_input_text},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{file_data['content']}"}}
-            ]
-            current_state['messages'].append(HumanMessage(content=multimodal_content))
+
+            try:
+                # 优化图片以减少token消耗
+                image_b64_raw = file_data['content']
+                # 解码base64图片
+                image_bytes = base64.b64decode(image_b64_raw)
+                image = Image.open(io.BytesIO(image_bytes))
+
+                original_size = image.size
+                print(f"[图片处理] 原始尺寸: {original_size[0]}x{original_size[1]}")
+
+                # 应用优化
+                optimized_b64 = optimize_image_for_llm(image, max_width=1280, quality=80)
+
+                multimodal_content = [
+                    {"type": "text", "text": user_input_text},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{optimized_b64}"}}
+                ]
+                current_state['messages'].append(HumanMessage(content=multimodal_content))
+
+            except Exception as e:
+                print(f"[图片处理] 优化失败，使用原始图片: {e}")
+                # 降级方案：使用原始图片
+                multimodal_content = [
+                    {"type": "text", "text": user_input_text},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{file_data['content']}"}}
+                ]
+                current_state['messages'].append(HumanMessage(content=multimodal_content))
             
         else:
             # --- 场景二：附件是文档（来自文件上传）或没有附件 ---
@@ -320,42 +367,66 @@ async def request_assistance():
         context_to_process = pending_assistance_requests.pop(request_id, None)
         if not context_to_process: return jsonify({"error": "Invalid or expired assistance request."}), 404
 
-        # 1. 调用 Analyzer Agent 进行分析
+        # 1. 调用 Analyzer Agent 进行分析（使用Pro模型进行深度多模态分析）
         analysis_result = await UserStateModeler.analyze_user_context_and_suggest(
             context=context_to_process,
-            llm=llm, # 使用全局的、支持视觉的LLM
-            tools_config=tools_config # 传递可用的工具
+            llm=llm_pro,  # 使用Pro模型（需要多模态分析和复杂推理）
+            tools_config=tools_config
         )
 
-        # 如果分析失败或没有建议，也返回一个完整的结构
-        if not analysis_result or (not analysis_result.get("recommended_tool") and not analysis_result.get("suggestion_text")):
-            error_msg = analysis_result.get("suggestion_text", "分析失败，无法提供建议。")
+        # 提取selected_intervention（新的数据结构）
+        selected = analysis_result.get("selected_intervention", {})
+        suggestion_text = selected.get("suggestion_text", "")
+        recommended_tool = selected.get("recommended_tool", None)
+
+        # 如果分析失败或没有建议，返回错误
+        if not analysis_result or not suggestion_text:
+            error_msg = suggestion_text if suggestion_text else "分析失败，无法提供建议。"
             return jsonify({
                 "analysis_message": "系统分析完成。",
                 "response": error_msg
             })
-        
-        # 2. 基于分析结果，构建一个清晰的 "Handoff" 消息给主Agent
+
+        # 2. 基于认知效益分析结果，构建"Handoff"消息给主Agent
+        # 提取认知效益指标
+        offloading_benefit = selected.get("offloading_benefit", 0)
+        interaction_cost = selected.get("interaction_cost", 0)
+        success_probability = selected.get("success_probability", 0.0)
+        net_benefit = selected.get("net_cognitive_benefit", 0)
+        intervention_type = selected.get("intervention_type", "unknown")
+
         handoff_prompt = f"""
-我刚刚确认需要帮助。我的主动式助理分析了我的情况，并给出了以下建议：
+我刚刚确认需要帮助。我的认知伙伴分析了我的情况，并基于认知效益最大化原则给出了以下建议：
 
-- **它认为我正在做**: {analysis_result['user_intent']}
-- **它建议的操作**: {analysis_result['suggestion_text']}
-- **它建议使用的工具**: `{analysis_result['recommended_tool']}`
-- **理由**: {analysis_result['reasoning']}
+【用户状态分析】
+- **当前任务**: {analysis_result.get('user_task', '未知')}
+- **意图目标**: {analysis_result.get('user_intent', '未知')}
+- **主要障碍**: {analysis_result.get('obstacle', '无')}
 
-请根据这个建议继续操作。如果这是一个工具调用，请直接准备并执行它。
+【认知效益评估】
+- **卸载效益**: {offloading_benefit}/100（能为我节省的认知资源）
+- **交互成本**: {interaction_cost}/100（理解建议所需的认知资源）
+- **成功概率**: {success_probability:.0%}
+- **净认知效益**: {net_benefit}
+- **干预类型**: {intervention_type}
+
+【推荐方案】
+- **建议**: {suggestion_text}
+- **推荐工具**: {recommended_tool if recommended_tool else "无需工具"}
+- **决策理由**: {analysis_result.get('reasoning', '无')}
+
+请根据这个建议继续操作。如果涉及工具调用，请直接准备并执行它。
 """
 
-        # 3. 将这个 Handoff 消息作为用户的最新输入，送入主工作流
+        # 3. 将Handoff消息作为用户输入，送入主工作流
         state = await get_session_state(session_id)
         state['messages'].append(HumanMessage(content=handoff_prompt))
-        
+
         final_state = await core_agent_app.ainvoke(state, {"recursion_limit": 10})
         await save_session_state(session_id, final_state)
 
         return jsonify({
-                "analysis_message": f"系统分析完成，建议: {analysis_result['suggestion_text']}\n理由: {analysis_result['reasoning']}",
+                "analysis_message": f"【认知效益分析】净效益: {net_benefit} | 建议: {suggestion_text}",
                 "response": final_state['messages'][-1].content
             })
 
@@ -398,38 +469,62 @@ async def manual_trigger_assistance():
             "activity_log": [{"timestamp": datetime.now().isoformat(), "activity": current_activity}]
         }
 
-        # 4. 【核心】直接调用 Analyzer Agent (UserStateModeler) 进行分析
+        # 4. 【核心】直接调用 Analyzer Agent 进行分析（使用Pro模型）
         analysis_result = await UserStateModeler.analyze_user_context_and_suggest(
             context=context_to_analyze,
-            llm=llm,
+            llm=llm_pro,  # 使用Pro模型（需要多模态分析和复杂推理）
             tools_config=tools_config
         )
 
-        if not analysis_result or (analysis_result.get("recommended_tool") is None and not analysis_result.get("suggestion_text")):
-            # 如果分析失败或没有任何建议
-            error_msg = analysis_result.get("suggestion_text", "分析失败，无法提供建议。")
+        # 提取selected_intervention（新的数据结构）
+        selected = analysis_result.get("selected_intervention", {})
+        suggestion_text = selected.get("suggestion_text", "")
+        recommended_tool = selected.get("recommended_tool", None)
+
+        # 如果分析失败或没有建议
+        if not analysis_result or not suggestion_text:
+            error_msg = suggestion_text if suggestion_text else "分析失败，无法提供建议。"
             return jsonify({"analysis_message": "系统分析完成。", "final_response": error_msg})
 
-        # 5. 构建 Handoff 消息并送入主工作流 (与 /request_assistance 路由后半部分完全相同)
-        handoff_prompt = f"""
-用户刚刚手动请求了帮助。我的主动式助理分析了用户当前的情况，并给出了以下建议：
+        # 5. 构建基于认知效益的Handoff消息并送入主工作流
+        # 提取认知效益指标
+        offloading_benefit = selected.get("offloading_benefit", 0)
+        interaction_cost = selected.get("interaction_cost", 0)
+        success_probability = selected.get("success_probability", 0.0)
+        net_benefit = selected.get("net_cognitive_benefit", 0)
+        intervention_type = selected.get("intervention_type", "unknown")
 
-- **它认为我正在做**: {analysis_result['user_intent']}
-- **它建议的操作**: {analysis_result['suggestion_text']}
-- **它建议使用的工具**: `{analysis_result.get('recommended_tool', '无')}`
-- **理由**: {analysis_result['reasoning']}
+        handoff_prompt = f"""
+用户手动请求了帮助。我的认知伙伴分析了当前情况，并基于认知效益最大化原则给出了以下建议：
+
+【用户状态分析】
+- **当前任务**: {analysis_result.get('user_task', '未知')}
+- **意图目标**: {analysis_result.get('user_intent', '未知')}
+- **主要障碍**: {analysis_result.get('obstacle', '无')}
+
+【认知效益评估】
+- **卸载效益**: {offloading_benefit}/100
+- **交互成本**: {interaction_cost}/100
+- **成功概率**: {success_probability:.0%}
+- **净认知效益**: {net_benefit}
+- **干预类型**: {intervention_type}
+
+【推荐方案】
+- **建议**: {suggestion_text}
+- **推荐工具**: {recommended_tool if recommended_tool else "无需工具"}
+- **理由**: {analysis_result.get('reasoning', '无')}
 
 请根据这个建议继续操作。
 """
         state = await get_session_state(session_id)
         state['messages'].append(HumanMessage(content=handoff_prompt))
-        
+
         final_state = await core_agent_app.ainvoke(state, {"recursion_limit": 10})
         await save_session_state(session_id, final_state)
 
         # 6. 返回分析消息和最终执行结果
         return jsonify({
-            "analysis_message": f"系统分析完成，建议: {analysis_result['suggestion_text']}\n理由: {analysis_result['reasoning']}",
+            "analysis_message": f"【认知效益分析】净效益: {net_benefit} | 建议: {suggestion_text}",
             "final_response": final_state['messages'][-1].content
         })
 
