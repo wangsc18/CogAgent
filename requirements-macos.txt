@@ -1,0 +1,48 @@
+# requirements-macos.txt
+# macOS 专用依赖文件
+
+# 基础框架
+python-dotenv
+langchain
+langchain-google-genai
+langgraph
+langchain-mcp-adapters
+quart
+langchain-community
+langchain-openai
+uvicorn
+hypercorn
+
+# Web 和UI
+gradio
+pillow
+requests
+
+# macOS 窗口管理 (需要使用 PyObjC)
+# CoreGraphics 已经包含在 Quartz 中，不需要单独安装
+pyobjc-framework-Quartz
+pyobjc-framework-Cocoa
+
+# 跨平台输入监控
+pynput
+
+# 可选：键鼠监控（如果pynput不够用）
+# keyboard
+# mouse
+
+# 计算机视觉
+opencv-python
+numpy
+
+# 深度学习 (PyTorch for macOS - 支持 MPS)
+torch
+torchvision
+
+# MCP 工具
+mcp[cli]
+
+# 文档处理
+python-pptx
+fonttools
+pypdf
+docx2txt
