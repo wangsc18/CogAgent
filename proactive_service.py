@@ -2,16 +2,16 @@
 import time
 import asyncio
 import uuid
-from agents.user_state_modeler import UserStateModeler
+from agents.executor_brain import UserStateModeler  # 【更新】使用新的执行脑模块
 from utils import activity_monitor, face_thread
-from utils.helpers import get_real_time_user_activity, log_message # 确保 log_message 被导入
+from utils.helpers import get_real_time_user_activity, log_message  # 确保 log_message 被导入
 
 UPDATE_INTERVAL_SECONDS = 5
 
 # 【核心修复】创建一个全局标志来跟踪监控器是否已启动
 _monitors_started = False
 
-async def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache, llm=None, decision_mode="llm"):
+async def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache, llm=None, llm_planner=None, decision_mode="heuristic"):
     """
     监控循环。
 
@@ -19,8 +19,9 @@ async def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache, llm
         sessions_dict: 会话字典
         msg_queue: 消息队列
         request_cache: 请求缓存
-        llm: LangChain LLM实例，用于LLM决策模式
-        decision_mode: 决策模式 "heuristic" 或 "llm" (默认: "llm")
+        llm: LangChain LLM实例，用于执行脑的LLM决策模式（可选）
+        llm_planner: LangChain LLM实例，用于规划脑的策略分析（推荐使用更强大的模型）
+        decision_mode: 决策模式 "heuristic"（推荐） 或 "llm" (默认: "heuristic")
     """
     global _monitors_started # 声明我们要修改的是全局变量
 
@@ -40,12 +41,13 @@ async def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache, llm
             # 如果监控器启动失败，这个后台任务就没有意义了，直接退出。
             return
 
-    # 创建用户状态建模器，传递LLM和决策模式
-    log_message(f"--- Initializing UserStateModeler with decision_mode={decision_mode} ---")
+    # 创建用户状态建模器（执行脑），传递LLM和规划脑的LLM
+    log_message(f"--- Initializing UserStateModeler (ExecutorBrain) with decision_mode={decision_mode} ---")
     modeler = UserStateModeler(
         observation_period_seconds=30,
         history_limit=6,
-        llm=llm,
+        llm=llm,  # 用于LLM决策模式（可选）
+        llm_planner=llm_planner,  # 【新增】用于规划脑策略分析
         decision_mode=decision_mode
     )
 

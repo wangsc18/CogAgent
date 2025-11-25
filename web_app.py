@@ -27,9 +27,9 @@ sys.path.append(project_root)
 
 from datetime import datetime
 from state import AgentState
-from agents.planner import run_planner
+from agents.meta_controller import run_meta_controller
 from agents.tool_manager import run_tool_manager
-from agents.user_state_modeler import UserStateModeler
+from agents.executor_brain import UserStateModeler  # 【更新】使用新的执行脑模块
 from agents.memory_agent import run_memory_agent
 from proactive_service import proactive_monitoring_loop
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -40,10 +40,28 @@ from utils.helpers import setup_logging, load_user_habits, log_message, get_real
 from dotenv import load_dotenv
 load_dotenv()
 
+# --- 自定义ChatOpenAI类以兼容第三方API ---
+class RobustChatOpenAI(ChatOpenAI):
+    """
+    兼容第三方OpenAI API的包装类。
+    提供额外的错误处理和调试信息。
+    """
+    async def ainvoke(self, input, config=None, **kwargs):
+        """重写异步调用方法，提供更好的错误信息"""
+        try:
+            return await super().ainvoke(input, config, **kwargs)
+        except (AttributeError, TypeError) as e:
+            # 如果仍然出现格式错误，提供详细的调试信息
+            if "'str' object has no attribute" in str(e):
+                log_message(f"⚠️ API响应格式异常: {e}")
+                log_message(f"请检查 OPENAI_BASE_URL 是否正确配置（需要包含 /v1 路径）")
+                log_message(f"当前 base_url: {self.openai_api_base}")
+            raise
+
 # --- 全局变量 ---
 llm = None  # <--- 将llm设为全局变量（向后兼容，指向主模型）
-llm_pro = None  # <--- Pro模型（gemini-2.5-pro）用于复杂推理
-llm_flash = None  # <--- Flash模型（gemini-2.0-flash）用于高频任务
+llm_pro = None  # <--- Pro模型（gpt-4o）用于复杂推理
+llm_flash = None  # <--- Flash模型（gpt-4o-mini）用于高频任务
 tools_config = {} # <--- 将tools_config设为全局变量
 executable_tools = {} # <--- 将executable_tools设为全局变量
 core_agent_app = None
@@ -52,6 +70,10 @@ SESSIONS = {}
 message_queue = asyncio.Queue()
 pending_assistance_requests = {}
 SESSIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions")
+
+# 【新增】快思慢想系统的全局组件（用于处理用户反馈）
+planner_brain_global = None  # 规划脑实例（全局共享）
+rules_manager_global = None  # 动态规则管理器（全局共享）
 
 # --- 消息序列化和反序列化辅助函数 ---
 def message_to_dict(message: BaseMessage) -> dict:
@@ -69,6 +91,7 @@ def dict_to_message(data: dict) -> BaseMessage:
 # --- 初始化函数 ---
 def initialize_system():
     global core_agent_app, memory_agent_app, llm, llm_pro, llm_flash, tools_config, executable_tools
+    global planner_brain_global, rules_manager_global  # 【新增】声明全局规划脑组件
     print("--- System Initializing ---")
     if not os.path.exists(SESSIONS_DIR):
         os.makedirs(SESSIONS_DIR)
@@ -91,39 +114,55 @@ def initialize_system():
     # === 多模型配置策略 ===
     # 根据agent的任务特点，使用不同性能的模型以优化响应速度和成本
 
-    # 1. 主LLM (gemini-2.5-pro) - 用于复杂推理任务
+    # 修正第三方API的base_url（自动添加 /v1 路径）
+    base_url = os.getenv('OPENAI_BASE_URL', '')
+    if base_url and not base_url.endswith('/v1'):
+        base_url = base_url.rstrip('/') + '/v1'
+        print(f"✓ 自动修正 base_url: {base_url}")
+
+    # 1. 主LLM (gpt-4o) - 用于复杂推理任务
     #    - Planner: 需要高级ToM推理
     #    - 认知效益分析: 需要多模态分析
-    llm_pro = ChatOpenAI(model='gemini-2.5-pro', temperature=0)
+    llm_pro = RobustChatOpenAI(
+        model='gemini-3-pro-preview',
+        temperature=0,
+        openai_api_key=os.getenv('OPENAI_API_KEY'),
+        openai_api_base=base_url if base_url else None
+    )
 
-    # 2. 快速LLM (gemini-2.0-flash) - 用于高频/简单任务
+    # 2. 快速LLM (gpt-4o-mini) - 用于高频/简单任务
     #    - LLM状态决策: 每30秒调用，纯文本，结构化输出
     #    - Memory Agent: 极低频，总结任务
-    llm_flash = ChatOpenAI(model='gemini-2.0-flash', temperature=0)
+    llm_flash = RobustChatOpenAI(
+        model='gemini-2.0-flash',
+        temperature=0,
+        openai_api_key=os.getenv('OPENAI_API_KEY'),
+        openai_api_base=base_url if base_url else None
+    )
 
     # 向后兼容：全局llm指向主模型
     llm = llm_pro
 
     print(f"--- Models Configured ---")
-    print(f"  Pro Model (complex reasoning): gemini-2.5-pro")
-    print(f"  Flash Model (high-frequency tasks): gemini-2.0-flash")
+    print(f"  Pro Model (complex reasoning): gpt-4o")
+    print(f"  Flash Model (high-frequency tasks): gpt-4o-mini")
 
     user_habits = load_user_habits()
     workflow = StateGraph(AgentState)
 
-    # Planner使用Pro模型（需要复杂推理）
-    planner_node = partial(run_planner, llm=llm_pro, tools_config=tools_config, user_habits=user_habits, executable_tools=executable_tools)
+    # MetaController使用Pro模型（需要复杂推理）
+    meta_controller_node = partial(run_meta_controller, llm=llm_pro, tools_config=tools_config, user_habits=user_habits, executable_tools=executable_tools)
     tool_manager_node = partial(run_tool_manager, executable_tools=executable_tools)
-    workflow.add_node("planner", planner_node)
+    workflow.add_node("meta_controller", meta_controller_node)
     workflow.add_node("tool_manager", tool_manager_node)
-    workflow.set_entry_point("planner")
+    workflow.set_entry_point("meta_controller")
     def router(state: AgentState):
         last_message = state['messages'][-1]
         if isinstance(last_message, AIMessage) and last_message.tool_calls:
             return "tool_manager"
         return END
-    workflow.add_conditional_edges("planner", router, {"tool_manager": "tool_manager", "__end__": END})
-    workflow.add_edge("tool_manager", "planner")
+    workflow.add_conditional_edges("meta_controller", router, {"tool_manager": "tool_manager", "__end__": END})
+    workflow.add_edge("tool_manager", "meta_controller")
     core_agent_app = workflow.compile()
     print("--- Core Dialogue Agent Initialized Successfully ---")
 
@@ -157,6 +196,15 @@ def initialize_system():
     
     memory_agent_app = memory_workflow.compile()
     print("--- Memory Agent Initialized Successfully ---")
+
+    # 【新增】初始化快思慢想系统的全局组件（用于处理用户反馈）
+    print("--- Initializing Global Planner Brain for Feedback Processing ---")
+    from utils.dynamic_rules import DynamicRulesManager
+    from agents.planner_brain import PlannerBrain
+
+    rules_manager_global = DynamicRulesManager()
+    planner_brain_global = PlannerBrain(llm=llm_pro, rules_manager=rules_manager_global)
+    print(f"✓ Planner Brain initialized (current acceptance rate: {rules_manager_global.rules.get('acceptance_rate', 0):.1%})")
 
 # --- 会话状态函数 ---
 async def get_session_state(session_id: str) -> dict: # 1. 改为 async def
@@ -223,16 +271,19 @@ app = Quart(__name__)
 async def startup_background_tasks():
     print("--- Starting background tasks ---")
 
-    # 从环境变量读取决策模式配置，默认使用LLM模式
-    decision_mode = os.getenv("PROACTIVE_DECISION_MODE", "llm")  # "llm" 或 "heuristic"
+    # 从环境变量读取决策模式配置，默认使用heuristic模式（快思慢想架构）
+    decision_mode = os.getenv("PROACTIVE_DECISION_MODE", "heuristic")  # "heuristic" 或 "llm"
 
-    # 主动服务使用Flash模型（高频调用，每30秒一次状态判断）
+    # 【快思慢想架构】主动服务使用：
+    # - 执行脑（快思）：使用Flash模型进行高频状态判断（每30秒）
+    # - 规划脑（慢想）：使用Pro模型进行策略分析（仅在用户反馈后）
     app.add_background_task(
         proactive_monitoring_loop,
         sessions_dict=SESSIONS,
         msg_queue=message_queue,
         request_cache=pending_assistance_requests,
-        llm=llm_flash,  # 使用Flash模型进行快速状态决策
+        llm=llm_flash,  # 执行脑使用Flash模型（快速高频决策）
+        llm_planner=llm_pro,  # 【新增】规划脑使用Pro模型（复杂策略分析）
         decision_mode=decision_mode
     )
     
@@ -367,6 +418,18 @@ async def request_assistance():
         context_to_process = pending_assistance_requests.pop(request_id, None)
         if not context_to_process: return jsonify({"error": "Invalid or expired assistance request."}), 404
 
+        # 【新增】用户接受了主动服务，触发规划脑更新策略（慢想系统）
+        trigger_context = context_to_process.get("trigger_context_for_planner")
+        if trigger_context and planner_brain_global:
+            log_message("[WebApp] 用户接受主动服务，触发规划脑策略更新")
+            # 异步调用规划脑（不阻塞主流程）
+            asyncio.create_task(
+                planner_brain_global.analyze_and_update_strategy(
+                    user_accepted=True,
+                    trigger_context=trigger_context
+                )
+            )
+
         # 1. 调用 Analyzer Agent 进行分析（使用Pro模型进行深度多模态分析）
         analysis_result = await UserStateModeler.analyze_user_context_and_suggest(
             context=context_to_process,
@@ -429,6 +492,55 @@ async def request_assistance():
                 "analysis_message": f"【认知效益分析】净效益: {net_benefit} | 建议: {suggestion_text}",
                 "response": final_state['messages'][-1].content
             })
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"An error occurred: {e}"}), 500
+
+@app.route('/reject_assistance', methods=['POST'])
+async def reject_assistance():
+    """
+    用户拒绝主动服务时调用此接口，触发规划脑记录拒绝反馈并更新策略。
+
+    支持两种拒绝类型：
+    - explicit: 用户主动点击"不了，谢谢"（明确拒绝）
+    - timeout: 用户20秒无响应（隐式拒绝，可能在心流中或未注意）
+    """
+    try:
+        data = await request.get_json()
+        request_id, session_id = data.get("request_id"), data.get("session_id")
+        rejection_type = data.get("rejection_type", "explicit")  # 默认为显式拒绝
+
+        if not session_id:
+            return jsonify({"error": "No active session ID provided."}), 400
+
+        # 从缓存中移除该请求
+        context_to_process = pending_assistance_requests.pop(request_id, None)
+        if not context_to_process:
+            return jsonify({"error": "Invalid or expired assistance request."}), 404
+
+        # 用户拒绝了主动服务，触发规划脑更新策略（慢想系统）
+        trigger_context = context_to_process.get("trigger_context_for_planner")
+        if trigger_context and planner_brain_global:
+            # 【关键】在 trigger_context 中添加拒绝类型信息
+            trigger_context["rejection_type"] = rejection_type
+
+            rejection_type_text = "显式拒绝" if rejection_type == "explicit" else "超时无响应"
+            log_message(f"[WebApp] 用户拒绝主动服务（{rejection_type_text}），触发规划脑策略更新")
+
+            # 异步调用规划脑（不阻塞主流程）
+            asyncio.create_task(
+                planner_brain_global.analyze_and_update_strategy(
+                    user_accepted=False,
+                    trigger_context=trigger_context
+                )
+            )
+
+        return jsonify({
+            "status": "rejected",
+            "rejection_type": rejection_type,
+            "message": "已记录您的拒绝反馈，系统将优化主动服务策略。"
+        })
 
     except Exception as e:
         traceback.print_exc()
