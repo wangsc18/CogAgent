@@ -230,11 +230,11 @@ async def run_planner(state: AgentState, llm, tools_config: dict, user_habits: d
             llm_input = [msg for msg in messages[:-1] if isinstance(msg, SystemMessage)] + [HumanMessage(content=multimodal_content)]
             response = await llm.ainvoke(llm_input)
         else: # 如果列表里没有图片，按文本处理
-            response = await llm.ainvoke(decision_prompt_text)
+            response = await llm.ainvoke([HumanMessage(content=decision_prompt_text)])
     else:
         log_message("Planner preparing standard text input.")
-        # 对于纯文本/文档，直接发送“思考指令”
-        response = await llm.ainvoke(decision_prompt_text)
+        # 对于纯文本/文档，直接发送"思考指令"
+        response = await llm.ainvoke([HumanMessage(content=decision_prompt_text)])
 
     # --- 5. 统一处理 LLM 的 JSON 输出 (逻辑不变) ---
     response_str = response.content

@@ -1,28 +1,53 @@
-# agents/user_state_modeler.py
+# agents/executor_brain.py
+"""
+执行脑（快思系统）- 高频用户状态监测与决策Agent
+
+负责：
+1. 接收用户活动数据（每5秒）
+2. 基于动态规则进行快速评分和决策（每30秒）
+3. 判断是否需要触发主动服务
+4. 提供用户意图分析和建议生成
+
+调用频率：高频（每30秒一次决策）
+决策方式：基于规则的启发式计算 或 LLM智能判断
+"""
+
 import json
 import asyncio
 from datetime import datetime
-from utils.helpers import take_screenshot, log_message
+from typing import Dict, Any, Optional
 from langchain_core.messages import HumanMessage
 from langchain_core.language_models import BaseLanguageModel
-from typing import Dict, Any
+
+from utils.helpers import take_screenshot, log_message
+from utils.dynamic_rules import DynamicRulesManager
+from agents.planner_brain import PlannerBrain
+from agents.prompts import (
+    get_executor_llm_decision_prompt,
+    get_cognitive_benefit_analyzer_prompt
+)
+
 
 class UserStateModeler:
     """
-    用户建模器，支持两种决策模式：
-    1. 启发式模式 (heuristic): 使用加权分数模型判断是否需要主动服务
-    2. LLM模式 (llm): 使用大语言模型进行智能决策
-
-    同时作为一个"分析器Agent"，能够在用户确认后分析其意图并提出建议。
+    用户状态建模器（执行脑）- "快思慢想"系统中的快思部分
+    
+    支持两种决策模式：
+    - 启发式模式 (heuristic): 基于动态规则参数的加权分数模型，速度快、成本低（推荐）
+    - LLM模式 (llm): 使用大语言模型进行认知状态推理，准确度高但成本高
+    
+    同时提供"分析器"功能，在用户确认后进行深度意图分析和建议生成。
     """
+    
     def __init__(self, observation_period_seconds=30, history_limit=6,
-                 llm=None, decision_mode="llm"):
+                 llm=None, decision_mode="heuristic", llm_planner=None):
         """
         Args:
             observation_period_seconds: 观察周期（秒）
             history_limit: 历史记录数量限制
             llm: LangChain LLM实例，用于LLM决策模式
-            decision_mode: 决策模式 "heuristic" 或 "llm"
+            decision_mode: 决策模式 "heuristic"（推荐） 或 "llm"
+            llm_planner: 用于规划脑的LLM实例（通常是更强大的模型）
         """
         self.history = []
         self.period = observation_period_seconds
@@ -30,17 +55,27 @@ class UserStateModeler:
         self.llm = llm
         self.decision_mode = decision_mode
 
-        # 【启发式模式】定义分数模型的权重和阈值
-        self.weights = {
-            "cognitive_load": 0.6, # 认知负荷作为基础分的权重，提升至60%
-            "stuck_bonus": 1.5,  # "卡壳信号"的奖励乘数，非常重要
-            "flow_signal": 0.5, # "心流"状态下的惩罚乘数
-            "window_switch": 0.4 # "分心信号"（窗口切换）的权重
-        }
-        self.proactive_threshold = 100 # 阈值
+        # 初始化动态规则管理器
+        self.rules_manager = DynamicRulesManager()
+
+        # 初始化规划脑（如果提供了LLM）
+        self.planner_brain = None
+        if llm_planner is not None:
+            self.planner_brain = PlannerBrain(llm=llm_planner, rules_manager=self.rules_manager)
+            log_message("[ExecutorBrain] 规划脑已启用（慢想系统）")
+        else:
+            log_message("[ExecutorBrain] 规划脑未启用，将使用固定规则参数")
+
+        # 从动态规则加载权重和阈值
+        self.weights = self.rules_manager.get_weights()
+        self.proactive_threshold = self.rules_manager.get_threshold()
+
+        log_message(f"[ExecutorBrain] 决策模式: {decision_mode}")
+        log_message(f"[ExecutorBrain] 当前阈值: {self.proactive_threshold}")
+        log_message(f"[ExecutorBrain] 当前权重: {json.dumps(self.weights, ensure_ascii=False)}")
 
     def log_current_state_from_data(self, activity: dict):
-        """从外部接收活动数据并记录。"""
+        """从外部接收活动数据并记录"""
         timestamp = datetime.now().isoformat()
         self.history.append({"timestamp": timestamp, "activity": activity})
         if len(self.history) > self.limit:
@@ -48,10 +83,10 @@ class UserStateModeler:
 
     def calculate_proactive_score(self) -> dict:
         """
-        计算并返回当前周期的主动服务分数和明细。
-        所有单项分数都归一化到 0-100 的范围。
+        计算并返回当前周期的主动服务分数和明细
+        所有单项分数都归一化到 0-100 的范围
         """
-        # --- 1. 获取基础指标 ---
+        # 获取基础指标
         last_activity = self.history[-1]['activity']
         cognitive_load = last_activity.get("cognitive_load", "low_load")
         confidence = last_activity.get("confidence", 0.0)
@@ -64,35 +99,31 @@ class UserStateModeler:
 
         scores = {}
         
-        # --- 2. 计算各分项得分 ---
+        # 计算各分项得分
         
         # a) 认知负荷得分 (考虑置信度)
         if cognitive_load == "Low Load":
-            # 低负荷：0~33
             scores["cognitive_load"] = int(confidence * 33)
         elif cognitive_load == "Medium Load":
-            # 中负荷：34~66
             scores["cognitive_load"] = int(34 + confidence * (66 - 34))
         elif cognitive_load == "High Load":
-            # 高负荷：67~100
             scores["cognitive_load"] = int(67 + confidence * (100 - 67))
         else:
             scores["cognitive_load"] = 0
 
-        # b) “卡壳”信号分 (Stuck Signal Score)
+        # b) "卡壳"信号分
         is_stuck = (scores["cognitive_load"] > 60) and (avg_keyboard_hz < 0.5 and avg_mouse_hz < 0.5)
-        scores["stuck_signal"] = 100 if is_stuck else 0 # 如果卡壳，信号分为满分100
+        scores["stuck_signal"] = 100 if is_stuck else 0
 
-        # c) “心流”信号分 (Flow Signal Score)
-        # 将键盘和鼠标活动归一化到一个0-100的“心流”分数
+        # c) "心流"信号分
         keyboard_flow = min(100, (avg_keyboard_hz / 8.0) * 100)
-        mouse_flow = min(100, (avg_mouse_hz / 5.0) * 50) # 鼠标权重较低
-        scores["flow_signal"] = (keyboard_flow * 0.7) + (mouse_flow * 0.3) # 键盘占70%
+        mouse_flow = min(100, (avg_mouse_hz / 5.0) * 50)
+        scores["flow_signal"] = (keyboard_flow * 0.7) + (mouse_flow * 0.3)
         
-        # d) 窗口切换得分 (线性映射, 超过5次为满分)
+        # d) 窗口切换得分
         scores["window_switch"] = min(100, (changed_windows_count / 5.0) * 100)
         
-        # --- 3. 计算加权总分 ---
+        # 计算加权总分
         total_score = (
             scores["cognitive_load"] * self.weights["cognitive_load"] +
             scores["stuck_signal"] * self.weights["stuck_bonus"] +
@@ -116,7 +147,7 @@ class UserStateModeler:
 
     def analyze_and_decide(self) -> dict:
         """
-        基于配置的决策模式进行分析和决策。
+        基于配置的决策模式进行分析和决策
         支持两种模式：启发式 (heuristic) 和 LLM决策 (llm)
         """
         if len(self.history) < self.limit:
@@ -133,13 +164,18 @@ class UserStateModeler:
 
     def _heuristic_analyze_and_decide(self) -> dict:
         """
-        【启发式模式】基于分数模型进行分析和决策。
+        【启发式模式 - 执行脑/快思】基于动态规则参数的分数模型进行快速决策
         """
+        # 每次决策前重新加载最新规则（以防规划脑已更新）
+        self.weights = self.rules_manager.get_weights()
+        self.proactive_threshold = self.rules_manager.get_threshold()
+
         score_result = self.calculate_proactive_score()
 
-        log_message("--- User State Score (Heuristic Mode) ---")
+        log_message("--- User State Score (Heuristic Mode / 执行脑-快思) ---")
         log_message(f"Total Score: {score_result['total_score']} / {self.proactive_threshold}")
         log_message(f"Breakdown: {json.dumps(score_result['breakdown'])}")
+        log_message(f"Current Weights: {json.dumps(self.weights)}")
 
         history_to_return = self.history.copy()
         self.history = []
@@ -147,7 +183,19 @@ class UserStateModeler:
         if not score_result["is_above_threshold"]:
             return {"needs_inquiry": False}
 
-        reason_for_inquiry = f"系统综合评分 ({score_result['total_score']:.0f}) 超过了阈值，表明用户可能需要帮助。"
+        reason_for_inquiry = f"系统综合评分 ({score_result['total_score']:.0f}) 超过了阈值 ({self.proactive_threshold})，表明用户可能需要帮助。"
+
+        # 保存完整的触发上下文，用于规划脑后续分析
+        trigger_context = {
+            "timestamp": datetime.now().isoformat(),
+            "total_score": score_result['total_score'],
+            "threshold": self.proactive_threshold,
+            "weights": self.weights.copy(),
+            "breakdown": score_result['breakdown'],
+            "raw_metrics": score_result['raw_metrics'],
+            "cognitive_state": score_result['raw_metrics']['cognitive_load'],
+            "activity_log": history_to_return
+        }
 
         return {
             "needs_inquiry": True,
@@ -162,18 +210,27 @@ class UserStateModeler:
                     "final_cognitive_load": score_result['raw_metrics']['cognitive_load'],
                     "final_confidence": round(score_result['raw_metrics']['confidence'], 2)
                 },
-                "activity_log": history_to_return
+                "activity_log": history_to_return,
+                # 保存触发上下文用于规划脑
+                "trigger_context_for_planner": trigger_context
             }
         }
 
     def _llm_analyze_and_decide(self) -> dict:
         """
-        【LLM模式】使用大语言模型进行智能决策。
-        LLM会综合分析用户活动数据，判断是否需要主动服务干预。
+        【LLM模式 - 快思】使用大语言模型进行智能决策
+
+        关键改进：LLM的判断会参考由慢想（planner_brain）学习的动态规则参数
+        这样LLM模式和启发式模式都能享受规划脑的学习成果
         """
         if self.llm is None:
             log_message("ERROR: LLM mode enabled but no LLM instance provided. Falling back to heuristic.")
             return self._heuristic_analyze_and_decide()
+
+        # 【关键】加载最新的规则参数（慢想学习的成果）
+        self.weights = self.rules_manager.get_weights()
+        self.proactive_threshold = self.rules_manager.get_threshold()
+        acceptance_rate = self.rules_manager.rules.get("acceptance_rate", 0.5)
 
         # 准备数据
         history_to_return = self.history.copy()
@@ -189,72 +246,51 @@ class UserStateModeler:
         end_titles = set(history_to_return[-1]['activity'].get('window_titles', []))
         changed_windows_count = len(start_titles.symmetric_difference(end_titles))
 
-        # 构建精炼版的认知状态推断prompt（优化推理速度和token消耗）
-        decision_prompt = f"""
-你是AI认知伙伴，运用心智理论推断用户认知状态并决策是否干预。
+        # 【新增】如果启用了规划脑，计算启发式分数作为LLM的参考
+        heuristic_score = None
+        if self.planner_brain:
+            # 临时构建完整历史用于计算分数
+            temp_history = history_to_return.copy()
+            self.history = temp_history
+            score_result = self.calculate_proactive_score()
+            heuristic_score = score_result['total_score']
+            self.history = []  # 清空临时历史
 
-# 观察数据（过去{self.period}秒）
-- 认知负荷: {last_activity.get("cognitive_load", "unknown")} ({last_activity.get("confidence", 0.0):.0%})
-- 键盘/鼠标: {avg_keyboard_hz:.2f}Hz / {avg_mouse_hz:.2f}Hz
-- 窗口切换: {changed_windows_count}次
-- 应用数: {last_activity.get("open_apps_count", 0)}个
-
-# 认知状态分类（基于心流理论+认知负荷理论）
-
-**A. 心流**(Flow): 中高负荷+高频活动(>2Hz)+窗口稳定 → 沉浸状态 → **不打扰**
-**B. 深度思考**(Thinking): 高负荷+低活动+短期(<50%观察期) → 正常思考 → **不打扰**
-**C. 卡壳**(Stuck): 高负荷+极低活动(<0.5Hz)+持续长(>70%观察期) → 迷茫受挫 → **需要帮助**
-**D. 过载**(Overload): 高负荷+无规律活动+频繁切换(>3次) → 认知超负荷 → **需要帮助**
-**E. 探索**(Explore): 中负荷+中等活动(1-2.5Hz)+适度切换 → 搜索信息 → **观察**
-**F. 休息**(Rest): 低负荷+低活动 → 非工作状态 → **不打扰**
-
-# 核心区分: 心流 vs 卡壳
-高认知负荷时必须区分：
-- 心流=高活动+稳定节奏 → 技能匹配挑战
-- 卡壳=极低活动+持续停滞 → 挑战超出技能
-
-# 时间序列
-```json
-{json.dumps(history_to_return, indent=2, ensure_ascii=False)}
-```
-
-# 输出JSON（无额外文字）
-{{
-  "state": "A-F其中之一",
-  "psychological": "用户心理状态推断(1句话)",
-  "needs_intervention": true/false,
-  "confidence": 0.0-1.0,
-  "reasoning": "关键指标+理论依据(简短)",
-  "indicators": ["指标1", "指标2"],
-  "inquiry": "干预询问语或null"
-}}
-
-# 原则
-1. 优先保护心流状态
-2. 基于时间趋势而非瞬时状态
-3. 宁可少打扰不要误打扰
-"""
+        # 【使用prompts模块】构建注入动态规则参数的认知状态推断prompt
+        decision_prompt = get_executor_llm_decision_prompt(
+            period=self.period,
+            last_activity=last_activity,
+            avg_keyboard_hz=avg_keyboard_hz,
+            avg_mouse_hz=avg_mouse_hz,
+            changed_windows_count=changed_windows_count,
+            history=history_to_return,
+            proactive_threshold=self.proactive_threshold,
+            weights=self.weights,
+            acceptance_rate=acceptance_rate,
+            total_feedback_count=self.rules_manager.rules.get('total_feedback_count', 0),
+            heuristic_score=heuristic_score
+        )
 
         try:
-            log_message("--- LLM Decision Mode: Invoking LLM for proactive service decision ---")
+            log_message("--- LLM Decision Mode (with Dynamic Rules): Invoking LLM for proactive service decision ---")
+            log_message(f"Current Rules: threshold={self.proactive_threshold}, weights={json.dumps(self.weights)}")
+            if heuristic_score:
+                log_message(f"Heuristic Reference: score={heuristic_score:.1f}, suggest={'INTERVENE' if heuristic_score > self.proactive_threshold else 'WAIT'}")
 
-            # 调用LLM（同步调用）
-            import asyncio
+            # 调用LLM
             try:
                 loop = asyncio.get_running_loop()
-                # 在事件循环中，使用 run_in_executor
                 response = loop.run_until_complete(self.llm.ainvoke([HumanMessage(content=decision_prompt)]))
             except RuntimeError:
-                # 没有运行的事件循环，直接同步调用
                 response = self.llm.invoke([HumanMessage(content=decision_prompt)])
 
             response_content = response.content.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
             log_message(f"LLM Decision Raw Response: {response_content}")
 
-            # 解析LLM响应（精简版字段）
+            # 解析LLM响应
             parsed_decision = json.loads(response_content)
 
-            # 提取核心决策字段（新的简化字段名）
+            # 提取核心决策字段
             cognitive_state = parsed_decision.get("state", "未知状态")
             psychological_inference = parsed_decision.get("psychological", "无法推断心理状态")
             needs_intervention = parsed_decision.get("needs_intervention", False)
@@ -262,19 +298,42 @@ class UserStateModeler:
             reasoning = parsed_decision.get("reasoning", "LLM未提供理由")
             inquiry_text = parsed_decision.get("inquiry", "看起来您现在正忙，需要一些帮助吗？")
             key_behavioral_indicators = parsed_decision.get("indicators", [])
+            heuristic_alignment = parsed_decision.get("heuristic_alignment", "not_available")
 
             # 记录详细的推断结果
             log_message("=" * 60)
-            log_message("【LLM认知状态推断】")
+            log_message("【LLM认知状态推断】（基于慢想学习的动态规则）")
             log_message(f"状态: {cognitive_state}")
             log_message(f"心理: {psychological_inference}")
             log_message(f"干预: {needs_intervention} (置信度: {llm_confidence:.2%})")
             log_message(f"理由: {reasoning}")
             log_message(f"指标: {key_behavioral_indicators}")
+            if heuristic_score:
+                log_message(f"与启发式一致性: {heuristic_alignment}")
             log_message("=" * 60)
 
             if not needs_intervention:
                 return {"needs_inquiry": False}
+
+            # 【新增】构建触发上下文用于规划脑学习（与启发式模式保持一致）
+            trigger_context = {
+                "timestamp": datetime.now().isoformat(),
+                "total_score": heuristic_score if heuristic_score else 0,  # LLM模式下也提供参考分数
+                "threshold": self.proactive_threshold,
+                "weights": self.weights.copy(),
+                "breakdown": {},  # LLM模式没有分项分数
+                "raw_metrics": {
+                    "cognitive_load": last_activity.get("cognitive_load", "unknown"),
+                    "confidence": last_activity.get("confidence", 0.0),
+                    "avg_keyboard_hz": avg_keyboard_hz,
+                    "avg_mouse_hz": avg_mouse_hz,
+                    "changed_windows_count": changed_windows_count,
+                    "is_stuck": False  # LLM模式通过state判断
+                },
+                "cognitive_state": cognitive_state,
+                "activity_log": history_to_return,
+                "decision_mode": "llm_with_dynamic_rules"
+            }
 
             return {
                 "needs_inquiry": True,
@@ -286,14 +345,18 @@ class UserStateModeler:
                     "psychological_inference": psychological_inference,
                     "key_behavioral_indicators": key_behavioral_indicators,
                     "activity_summary": {
-                        "decision_mode": "llm_theory_driven",
+                        "decision_mode": "llm_with_dynamic_rules",
                         "avg_keyboard_hz": round(avg_keyboard_hz, 2),
                         "avg_mouse_hz": round(avg_mouse_hz, 2),
                         "changed_windows_count": changed_windows_count,
                         "final_cognitive_load": last_activity.get("cognitive_load", "unknown"),
-                        "final_confidence": round(last_activity.get("confidence", 0.0), 2)
+                        "final_confidence": round(last_activity.get("confidence", 0.0), 2),
+                        "heuristic_score": heuristic_score if heuristic_score else None,
+                        "heuristic_alignment": heuristic_alignment
                     },
-                    "activity_log": history_to_return
+                    "activity_log": history_to_return,
+                    # 【关键】保存触发上下文用于规划脑
+                    "trigger_context_for_planner": trigger_context
                 }
             }
 
@@ -302,9 +365,49 @@ class UserStateModeler:
             import traceback
             traceback.print_exc()
             log_message("Falling back to heuristic mode due to LLM error")
-            # 恢复历史数据并使用启发式方法
             self.history = history_to_return
             return self._heuristic_analyze_and_decide()
+
+    async def process_user_feedback(
+        self,
+        user_accepted: bool,
+        trigger_context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        处理用户反馈并触发规划脑更新策略（慢想系统）
+
+        Args:
+            user_accepted: 用户是否接受了主动服务
+            trigger_context: 触发时保存的完整上下文（来自_heuristic_analyze_and_decide）
+
+        Returns:
+            规划脑的更新结果
+        """
+        if self.planner_brain is None:
+            log_message("[ExecutorBrain] 规划脑未启用，跳过策略更新")
+            # 即使没有规划脑，也记录反馈用于统计
+            self.rules_manager.record_feedback(user_accepted)
+            return {
+                "success": False,
+                "reason": "planner_brain_not_enabled",
+                "feedback_recorded": True
+            }
+
+        log_message(f"[ExecutorBrain] 触发规划脑更新策略（用户{'接受' if user_accepted else '拒绝'}）")
+
+        # 调用规划脑进行策略分析和更新
+        result = await self.planner_brain.analyze_and_update_strategy(
+            user_accepted=user_accepted,
+            trigger_context=trigger_context
+        )
+
+        # 如果规则已更新，重新加载到当前实例
+        if result.get("adjustment_made", False):
+            self.weights = self.rules_manager.get_weights()
+            self.proactive_threshold = self.rules_manager.get_threshold()
+            log_message(f"[ExecutorBrain] 已加载最新规则: 阈值={self.proactive_threshold}, 权重={json.dumps(self.weights)}")
+
+        return result
 
     @staticmethod
     async def analyze_user_context_and_suggest(
@@ -313,15 +416,11 @@ class UserStateModeler:
         tools_config: Dict[str, Any]
     ) -> Dict[str, str]:
         """
-        基于认知效益效用函数的主动服务决策。
-
+        基于认知效益效用函数的主动服务决策
+        
         核心公式：净认知效益 = (卸载效益 × 成功概率) - 交互成本
-
-        - 卸载效益：主动服务能为用户节省的认知资源（0-100）
-        - 交互成本：用户理解和采纳建议所需的认知资源（0-100）
-        - 成功概率：用户接受并执行的概率（0.0-1.0）
-
-        根据用户认知状态动态调整服务形式。
+        
+        根据用户认知状态动态调整服务形式
         """
         log_message("=" * 60)
         log_message("【认知效益分析器启动】")
@@ -342,115 +441,16 @@ class UserStateModeler:
 
         screenshot_b64 = await asyncio.to_thread(take_screenshot)
 
-        # 构建基于认知效益的分析prompt
-        analyzer_prompt_text = f"""
-你是AI认知伙伴，负责通过**认知效益最大化**来决策主动服务策略。
+        # 【使用prompts模块】构建基于认知效益的分析prompt
+        analyzer_prompt_text = get_cognitive_benefit_analyzer_prompt(
+            cognitive_state=cognitive_state,
+            psychological_inference=psychological_inference,
+            reason=reason,
+            summary=summary,
+            intervention_profile=intervention_profile,
+            tools_config=tools_config
+        )
 
-# 用户认知状态
-- **状态**: {cognitive_state}
-- **心理**: {psychological_inference}
-- **系统分析**: {reason}
-- **认知负荷**: {summary.get('final_cognitive_load', 'N/A')} ({summary.get('final_confidence', 0.0):.0%})
-- **活动水平**: 键盘{summary.get('avg_keyboard_hz', 'N/A')}Hz / 鼠标{summary.get('avg_mouse_hz', 'N/A')}Hz
-
-# 干预策略约束
-基于用户当前认知状态，你必须遵循以下约束：
-- **策略类型**: {intervention_profile['strategy_name']}
-- **策略原则**: {intervention_profile['description']}
-- **交互成本上限**: {intervention_profile['max_interaction_cost']}/100
-- **建议复杂度**: {intervention_profile['complexity_level']}
-
-# 认知效益决策框架
-
-你需要评估并选择**最大化净认知效益**的干预方案。
-
-## 效用函数
-```
-净认知效益 = (卸载效益 × 成功概率) - 交互成本
-```
-
-## 参数定义
-
-**卸载效益 (0-100)**: 为用户节省的认知资源
-- 完全自动化任务: 90-100
-- 提供关键快捷方式: 70-85
-- 减少信息搜索: 50-70
-- 任务优先级建议: 40-60
-- 一般性建议: 20-40
-
-**交互成本 (0-100)**: 用户理解和采纳所需的认知资源
-- 1句话核心提示: 10-20
-- 2-3句话 + 1个具体建议: 30-50
-- 多步骤方案 + 选项: 60-80
-- 复杂详尽方案: 80-100
-**约束**: 必须 ≤ {intervention_profile['max_interaction_cost']}
-
-**成功概率 (0.0-1.0)**: 用户接受并执行的概率
-- 基础概率: {intervention_profile['base_success_prob']:.2f}
-- 调整因子:
-  * 与用户当前任务直接相关: +0.2
-  * 需要额外学习/理解: -0.2
-  * 工具自动化执行: +0.1
-
-# 可用工具
-```json
-{json.dumps(tools_config, indent=2, ensure_ascii=False)}
-```
-
-# 你的任务
-
-## 步骤1: 分析用户任务和意图
-从屏幕截图中识别：
-1. 用户正在做什么（具体任务）
-2. 用户的目标是什么（意图）
-3. 用户遇到的主要障碍（如果有）
-
-## 步骤2: 生成候选干预方案
-列出2-4个可能的干预方案，每个方案包括：
-- 具体建议内容
-- 估算的卸载效益
-- 估算的交互成本
-- 估算的成功概率
-
-## 步骤3: 计算并选择最优方案
-计算每个方案的净认知效益，选择得分最高的方案。
-
-## 步骤4: 生成适应性建议
-根据用户认知状态，生成相应复杂度的建议：
-- **心流/专注**: 最小化文字，只给关键词或等待时机
-- **卡壳/迷茫**: 1句话 + 1个具体可行动的建议
-- **认知过载**: 提供卸载方案，不增加新信息
-- **探索状态**: 提供2-3个简洁选项
-- **低负荷**: 可以提供完整信息
-
-# 输出JSON（无额外文字）
-{{
-  "user_task": "用户当前主要任务(简短)",
-  "user_intent": "用户目标意图(1句话)",
-  "obstacle": "主要障碍(1句话，无则null)",
-  "candidate_interventions": [
-    {{
-      "description": "方案描述",
-      "offloading_benefit": 0-100,
-      "interaction_cost": 0-100,
-      "success_probability": 0.0-1.0,
-      "net_benefit": "计算结果"
-    }}
-  ],
-  "selected_intervention": {{
-    "suggestion_text": "根据认知状态生成的适应性建议文本",
-    "recommended_tool": "工具名或null",
-    "intervention_type": "tool_automation/priority_advice/information_support/minimal_disturbance",
-    "offloading_benefit": 0-100,
-    "interaction_cost": 0-100,
-    "success_probability": 0.0-1.0,
-    "net_cognitive_benefit": "计算结果"
-  }},
-  "reasoning": "为何选择此方案的简短理由(必须引用效益计算)"
-}}
-
-现在开始分析。
-"""
         multimodal_content = [
             {"type": "text", "text": analyzer_prompt_text},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{screenshot_b64}"}}
@@ -505,17 +505,7 @@ class UserStateModeler:
 
     @staticmethod
     def _get_intervention_profile(cognitive_state: str) -> Dict[str, Any]:
-        """
-        根据用户认知状态返回干预策略配置。
-
-        返回字段：
-        - strategy_name: 策略名称
-        - description: 策略描述
-        - max_interaction_cost: 最大允许交互成本
-        - base_success_prob: 基础成功概率
-        - complexity_level: 建议复杂度级别
-        """
-        # 提取状态标识符（A-F）
+        """根据用户认知状态返回干预策略配置"""
         state_id = cognitive_state[0] if cognitive_state else "E"
 
         profiles = {

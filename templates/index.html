@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Core Agent Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="{{ url_for('static', filename='chart.js') }}"></script>
@@ -9,12 +10,69 @@
     <script src="https://cdn.jsdelivr.net/npm/dompurify@2.3.6/dist/purify.min.js"></script>
     <style>
         /* 页面布局和基本样式 */
-        body, html { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-size: 14px; /* 固定基础字体大小 */
+        }
         .app-layout { display: flex; height: 100vh; }
         .main-content { flex-grow: 1; display: flex; flex-direction: column; background-color: #f4f7f9; }
-        #dashboard-container { display: flex; gap: 2vw; padding: 2vw; border-bottom: 1px solid #e0e0e0; background-color: white; height: 20vh; min-height: 160px; }
-        .chart-card { min-width: 0; background-color: white; padding: 2vw; border-radius: 0.8vw; box-shadow: 0 0.4vw 0.6vw rgba(0,0,0,0.05); display: flex; flex-direction: column; min-height: 0; }
-        .chart-title { font-size: 1.2em; font-weight: 600; margin-bottom: 1vw; color: #333; flex-shrink: 0; }
+        #dashboard-container {
+            display: flex;
+            gap: 20px;
+            padding: 12px;
+            border-bottom: 1px solid #e0e0e0;
+            background-color: white;
+            height: 160px; /* 初始高度 */
+            min-height: 100px; /* 最小高度 */
+            max-height: 400px; /* 最大高度 */
+            position: relative;
+        }
+
+        /* 可拖动的分隔条 */
+        .resizer {
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            width: 100%;
+            height: 6px;
+            background: transparent;
+            cursor: ns-resize;
+            z-index: 10;
+        }
+        .resizer:hover {
+            background: rgba(0, 123, 255, 0.3);
+        }
+        .resizer::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 40px;
+            height: 3px;
+            background: #ccc;
+            border-radius: 2px;
+        }
+        .chart-card {
+            min-width: 0;
+            background-color: white;
+            padding: 10px; /* 减小padding */
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .chart-title {
+            font-size: 13px; /* 从15px减小到13px */
+            font-weight: 600;
+            margin-bottom: 6px; /* 从8px减小到6px */
+            color: #555; /* 稍微淡化颜色 */
+            flex-shrink: 0;
+        }
         .chart-placeholder { flex-grow: 1; position: relative; height: 80%; }
 
         /* 聊天界面样式 */
@@ -29,11 +87,21 @@
         .reactive_agent-bubble { background-color: #f1f0f0; color: black; border-bottom-left-radius: 4px; }
         .proactive_agent-bubble { background-color: #e6f7ff; color: #0056b3; border: 1px solid #91d5ff; font-size: 14px; }
         .system-bubble { background-color: #f8f9fa; color: #6c757d; border: 1px solid #dee2e6; font-size: 13px; font-style: italic; text-align: center; }
-        
+
         /* 输入区域 */
-        .input-area-container { padding: 15px 20px; border-top: 1px solid #e0e0e0; background-color: white; }
+        .input-area-container {
+            padding: 15px 20px;
+            border-top: 1px solid #e0e0e0;
+            background-color: white;
+            position: relative;
+            height: 140px; /* 初始高度 */
+            min-height: 100px; /* 最小高度 */
+            max-height: 300px; /* 最大高度 */
+            display: flex;
+            flex-direction: column;
+        }
         .input-elements-wrapper { display: flex; align-items: center; gap: 10px; }
-        #command-input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 20px; resize: none; font-size: 16px; }
+        #command-input { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 20px; resize: none; font-size: 16px; line-height: 1.4; height: 40px; min-height: 40px; max-height: 80px; overflow-y: auto; }
         #send-button, #file-upload-button { background: none; border: none; cursor: pointer; padding: 5px; display: flex; align-items: center; }
         .send-icon { width: 24px; height: 24px; color: #007bff; }
         .upload-icon { width: 22px; height: 22px; color: #6c757d; }
@@ -61,7 +129,7 @@
             border-radius: 18px;
             line-height: 1.5;
             word-wrap: break-word;
-            font-size: 1.1em; /* 使用相对大小 */
+            font-size: 14px; /* 固定字体大小 */
         }
         .message-bubble img { max-width: 100%; border-radius: 10px; margin-top: 8px; }
         .attachment-info { color: #a9a9a9 !important; font-style: italic; font-size: 0.9em; display: block; margin-top: 5px; }
@@ -77,8 +145,23 @@
             max-width: 50vw;
         }
 
-        .message-bubble code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background-color: #e9ecef; padding: 0.2vw 0.5vw; border-radius: 0.4vw; }
-        .message-bubble pre { background-color: #282c34; color: #abb2bf; padding: 1.5vw; border-radius: 0.8vw; margin-top: 1vw; margin-bottom: 0.5vw; overflow-x: auto; white-space: pre; }
+        .message-bubble code {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 0.9em;
+            background-color: #e9ecef;
+            padding: 2px 5px; /* 固定padding */
+            border-radius: 4px;
+        }
+        .message-bubble pre {
+            background-color: #282c34;
+            color: #abb2bf;
+            padding: 12px; /* 固定padding */
+            border-radius: 8px;
+            margin-top: 10px;
+            margin-bottom: 5px;
+            overflow-x: auto;
+            white-space: pre;
+        }
         .message-bubble pre code { background-color: transparent; padding: 0; color: inherit; }
 
     </style>
@@ -99,6 +182,7 @@
                         <canvas id="cognitiveLoadDistributionChart"></canvas>
                     </div>
                 </div>
+                <div class="resizer" id="dashboard-resizer"></div>
             </div>
             <div class="chat-interface-container">
                 <button id="new-chat-button">⊕ 新建对话</button>
@@ -114,6 +198,7 @@
                     <button id="confirm-no">不了，谢谢</button>
                 </div>
                 <div class="input-area-container">
+                    <div class="resizer" id="input-resizer" style="top: 0; bottom: auto;"></div>
                     <div class="input-elements-wrapper">
                         <button id="file-upload-button" type="button" aria-label="Attach file">
                             <svg class="upload-icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" width="22" height="22">
@@ -152,7 +237,99 @@
             const fileInput = document.getElementById("file-input");
             const fileUploadStatus = document.getElementById("file-upload-status");
             const fileUploadButton = document.getElementById("file-upload-button");
-            
+
+            // --- 可拖动调整大小功能 ---
+            const dashboardContainer = document.getElementById('dashboard-container');
+            const dashboardResizer = document.getElementById('dashboard-resizer');
+            const inputContainer = document.querySelector('.input-area-container');
+            const inputResizer = document.getElementById('input-resizer');
+
+            // Dashboard区域拖动
+            let isDraggingDashboard = false;
+            let startYDashboard = 0;
+            let startHeightDashboard = 0;
+
+            dashboardResizer.addEventListener('mousedown', function(e) {
+                isDraggingDashboard = true;
+                startYDashboard = e.clientY;
+                startHeightDashboard = dashboardContainer.offsetHeight;
+                document.body.style.cursor = 'ns-resize';
+                e.preventDefault();
+            });
+
+            // 输入区域拖动
+            let isDraggingInput = false;
+            let startYInput = 0;
+            let startHeightInput = 0;
+
+            inputResizer.addEventListener('mousedown', function(e) {
+                isDraggingInput = true;
+                startYInput = e.clientY;
+                startHeightInput = inputContainer.offsetHeight;
+                document.body.style.cursor = 'ns-resize';
+                e.preventDefault();
+            });
+
+            // 全局鼠标移动事件
+            document.addEventListener('mousemove', function(e) {
+                if (isDraggingDashboard) {
+                    const deltaY = e.clientY - startYDashboard;
+                    let newHeight = startHeightDashboard + deltaY;
+
+                    // 获取配置的min和max
+                    const minHeight = parseInt(getComputedStyle(dashboardContainer).minHeight);
+                    const maxHeight = parseInt(getComputedStyle(dashboardContainer).maxHeight);
+
+                    // 计算动态最大高度：确保conversation-log至少有100px
+                    const viewportHeight = window.innerHeight;
+                    const currentInputHeight = inputContainer.offsetHeight;
+                    const minConversationHeight = 100; // conversation-log最小高度
+                    const padding = 40; // 留出一些边距和边框空间
+                    const dynamicMaxHeight = viewportHeight - currentInputHeight - minConversationHeight - padding;
+
+                    // 取配置最大值和动态最大值中的较小者
+                    const effectiveMaxHeight = Math.min(maxHeight, dynamicMaxHeight);
+                    newHeight = Math.max(minHeight, Math.min(effectiveMaxHeight, newHeight));
+
+                    dashboardContainer.style.height = newHeight + 'px';
+
+                    // 触发图表重绘
+                    if (window.cognitiveLoadChart) window.cognitiveLoadChart.resize();
+                    if (window.cognitiveLoadPieChart) window.cognitiveLoadPieChart.resize();
+                }
+
+                if (isDraggingInput) {
+                    const deltaY = e.clientY - startYInput;
+                    let newHeight = startHeightInput - deltaY; // 注意这里是减，因为是向上拖动增加高度
+
+                    // 获取配置的min和max
+                    const minHeight = parseInt(getComputedStyle(inputContainer).minHeight);
+                    const maxHeight = parseInt(getComputedStyle(inputContainer).maxHeight);
+
+                    // 计算动态最大高度：确保conversation-log至少有100px
+                    const viewportHeight = window.innerHeight;
+                    const currentDashboardHeight = dashboardContainer.offsetHeight;
+                    const minConversationHeight = 100; // conversation-log最小高度
+                    const padding = 40; // 留出一些边距和边框空间
+                    const dynamicMaxHeight = viewportHeight - currentDashboardHeight - minConversationHeight - padding;
+
+                    // 取配置最大值和动态最大值中的较小者
+                    const effectiveMaxHeight = Math.min(maxHeight, dynamicMaxHeight);
+                    newHeight = Math.max(minHeight, Math.min(effectiveMaxHeight, newHeight));
+
+                    inputContainer.style.height = newHeight + 'px';
+                }
+            });
+
+            // 全局鼠标释放事件
+            document.addEventListener('mouseup', function() {
+                if (isDraggingDashboard || isDraggingInput) {
+                    isDraggingDashboard = false;
+                    isDraggingInput = false;
+                    document.body.style.cursor = '';
+                }
+            });
+
             // --- 会话ID管理 ---
             let sessionId = localStorage.getItem('agentSessionId');
             if (!sessionId) {
@@ -167,7 +344,15 @@
 
             // --- 辅助函数 ---
             function escapeHtml(text) { const div = document.createElement("div"); div.textContent = text; return div.innerHTML; }
-            function adjustTextareaHeight() { if (!commandInput) return; commandInput.style.height = "auto"; const maxHeight = parseFloat(getComputedStyle(commandInput).lineHeight) * 4; commandInput.style.height = Math.min(commandInput.scrollHeight, maxHeight) + "px"; commandInput.style.overflowY = (commandInput.scrollHeight > maxHeight) ? "auto" : "hidden"; }
+            function adjustTextareaHeight() {
+                if (!commandInput) return;
+                commandInput.style.height = "auto";
+                const minHeight = parseInt(getComputedStyle(commandInput).minHeight) || 40;
+                const maxHeight = parseInt(getComputedStyle(commandInput).maxHeight) || 80;
+                const newHeight = Math.max(minHeight, Math.min(commandInput.scrollHeight, maxHeight));
+                commandInput.style.height = newHeight + "px";
+                commandInput.style.overflowY = (commandInput.scrollHeight > maxHeight) ? "auto" : "hidden";
+            }
             function appendMessage(sender, textContent, imageUrl = null, attachmentInfo = null) {
                 const senderClass = sender === "You" ? "user" : (sender.startsWith("Agent (Proactive)") ? "proactive_agent" : "reactive_agent");
                 
@@ -227,18 +412,31 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false, // 这是让图表填充容器的关键！
+                    plugins: {
+                        legend: {
+                            labels: {
+                                font: { size: 10 }, // 缩小图例字体
+                                boxWidth: 15 // 缩小色块宽度
+                            }
+                        }
+                    },
                     scales: {
                         y_load: {
                             type: 'linear',
                             display: true,
                             position: 'left',
-                            title: { display: true, text: '认知负荷' },
+                            title: {
+                                display: true,
+                                text: '认知负荷',
+                                font: { size: 11 } // 缩小轴标题字体
+                            },
                             min: 0,
                             max: 2,
                             ticks: {
                                 stepSize: 1,
                                 autoSkip: false,
                                 precision: 0,
+                                font: { size: 10 }, // 缩小刻度字体
                                 callback: function(value) {
                                     const labels = { 0: '低', 1: '中', 2: '高' };
                                     return labels[value] !== undefined ? labels[value] : value;
@@ -253,8 +451,20 @@
                             type: 'linear',
                             display: true,
                             position: 'right',
-                            title: { display: true, text: '频率 (Hz)' },
+                            title: {
+                                display: true,
+                                text: '频率 (Hz)',
+                                font: { size: 11 } // 缩小轴标题字体
+                            },
+                            ticks: {
+                                font: { size: 10 } // 缩小刻度字体
+                            },
                             grid: { drawOnChartArea: false }
+                        },
+                        x: {
+                            ticks: {
+                                font: { size: 9 } // 缩小X轴刻度字体
+                            }
                         }
                     },
                     animation: { duration: 500 }
@@ -264,7 +474,7 @@
             // --- 2. 认知负荷分布扇形图 ---
             const ctxPie = document.getElementById('cognitiveLoadDistributionChart').getContext('2d');
             const pieChartData = {
-                labels: ['Low', 'Medium', 'High'],
+                labels: ['低', '中', '高'], // 改为中文标签
                 datasets: [{
                     label: '认知负荷次数',
                     // 初始数据从我们的累积状态变量中获取
@@ -293,6 +503,11 @@
                     plugins: {
                         legend: {
                             position: 'right',
+                            labels: {
+                                font: { size: 11 }, // 缩小图例字体
+                                boxWidth: 20, // 缩小色块宽度
+                                padding: 10 // 减小间距
+                            }
                         },
                         tooltip: {
                             callbacks: {
@@ -511,13 +726,30 @@
                 finally { currentAssistanceRequestId = null; }
             });
 
-            confirmNoBtn.addEventListener("click", function() {
+            confirmNoBtn.addEventListener("click", async function() {
                 if (inquiryTimeoutId) clearTimeout(inquiryTimeoutId);
                 inquiryTimeoutId = null;
+                if (!currentAssistanceRequestId) return;
                 confirmationBanner.classList.add("hidden");
                 appendMessage("You", "不了，谢谢。");
-                appendMessage("Agent (Proactive)", "好的，如果您需要帮助，可以随时向我提问。");
-                currentAssistanceRequestId = null;
+                try {
+                    const response = await fetch("/reject_assistance", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            request_id: currentAssistanceRequestId,
+                            session_id: sessionId,
+                            rejection_type: "explicit"  // 显式拒绝
+                        })
+                    });
+                    if (!response.ok) { const err = await response.json(); throw new Error(err.error); }
+                    const data = await response.json();
+                    appendMessage("Agent (Proactive)", "好的，如果您需要帮助，可以随时向我提问。");
+                } catch (error) {
+                    appendMessage("System Error", error.message);
+                } finally {
+                    currentAssistanceRequestId = null;
+                }
             });
 
             // --- 核心功能：手动求助 ---
@@ -570,14 +802,37 @@
                             confirmationBanner.classList.remove("hidden");
                             
                             // 3. 设置一个新的20秒计时器，超时后自动隐藏弹窗
-                            inquiryTimeoutId = setTimeout(() => {
+                            inquiryTimeoutId = setTimeout(async () => {
                                 console.log("Inquiry timed out. Hiding banner.");
                                 confirmationBanner.classList.add("hidden");
 
                                 appendMessage("You", "用户无响应。");
+
+                                // 调用后端记录超时拒绝
+                                const timeoutRequestId = currentAssistanceRequestId;
+                                currentAssistanceRequestId = null;
+                                inquiryTimeoutId = null;
+
+                                if (timeoutRequestId) {
+                                    try {
+                                        const response = await fetch("/reject_assistance", {
+                                            method: "POST",
+                                            headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({
+                                                request_id: timeoutRequestId,
+                                                session_id: sessionId,
+                                                rejection_type: "timeout"  // 超时无响应
+                                            })
+                                        });
+                                        if (response.ok) {
+                                            console.log("Timeout rejection recorded successfully.");
+                                        }
+                                    } catch (error) {
+                                        console.error("Error recording timeout rejection:", error);
+                                    }
+                                }
+
                                 appendMessage("Agent (Proactive)", "系统建议已超时，自动为您关闭。");
-                                currentAssistanceRequestId = null; // 清理ID
-                                inquiryTimeoutId = null; // 清理计时器ID
                             }, 20000); // 20000毫秒 = 20秒
                         }
                     } catch (e) { console.error("Error parsing SSE data:", e); }
