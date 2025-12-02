@@ -165,10 +165,15 @@ class UserStateModeler:
     def _heuristic_analyze_and_decide(self) -> dict:
         """
         【启发式模式 - 执行脑/快思】基于动态规则参数的分数模型进行快速决策
+
+        【新增】应用战略指导：结合规划脑分析的用户长期意图，调整主动服务内容
         """
         # 每次决策前重新加载最新规则（以防规划脑已更新）
         self.weights = self.rules_manager.get_weights()
         self.proactive_threshold = self.rules_manager.get_threshold()
+
+        # 【新增】加载战略指导
+        strategic_guidance = self.rules_manager.get_strategic_guidance()
 
         score_result = self.calculate_proactive_score()
 
@@ -177,11 +182,18 @@ class UserStateModeler:
         log_message(f"Breakdown: {json.dumps(score_result['breakdown'])}")
         log_message(f"Current Weights: {json.dumps(self.weights)}")
 
+        # 【新增】记录战略指导信息
+        user_goal = strategic_guidance.get("user_long_term_intent", {}).get("primary_goal", "未分析")
+        log_message(f"Strategic Guidance: 用户目标={user_goal}")
+
         history_to_return = self.history.copy()
         self.history = []
 
         if not score_result["is_above_threshold"]:
             return {"needs_inquiry": False}
+
+        # 【新增】根据战略指导调整询问内容
+        inquiry_text = self._generate_strategic_inquiry(strategic_guidance, score_result)
 
         reason_for_inquiry = f"系统综合评分 ({score_result['total_score']:.0f}) 超过了阈值 ({self.proactive_threshold})，表明用户可能需要帮助。"
 
@@ -194,12 +206,17 @@ class UserStateModeler:
             "breakdown": score_result['breakdown'],
             "raw_metrics": score_result['raw_metrics'],
             "cognitive_state": score_result['raw_metrics']['cognitive_load'],
-            "activity_log": history_to_return
+            "activity_log": history_to_return,
+            # 【新增】保存战略上下文
+            "strategic_context": {
+                "user_goal": user_goal,
+                "inquiry_text": inquiry_text
+            }
         }
 
         return {
             "needs_inquiry": True,
-            "inquiry_text": "看起来您现在正忙，需要一些帮助吗？",
+            "inquiry_text": inquiry_text,  # 使用战略化的询问内容
             "context": {
                 "reason": reason_for_inquiry,
                 "activity_summary": {
@@ -215,6 +232,78 @@ class UserStateModeler:
                 "trigger_context_for_planner": trigger_context
             }
         }
+
+    def _generate_strategic_inquiry(
+        self,
+        strategic_guidance: Dict[str, Any],
+        score_result: Dict[str, Any]
+    ) -> str:
+        """
+        【新增方法】根据战略指导生成个性化的主动服务询问
+
+        Args:
+            strategic_guidance: 规划脑提供的战略指导（基于当前工作情境）
+            score_result: 当前的评分结果
+
+        Returns:
+            个性化的询问文本
+        """
+        # 提取战略信息（新的数据结构）
+        work_context = strategic_guidance.get("current_work_context", {})
+        what_doing = work_context.get("what_user_is_doing", "")
+        current_task = work_context.get("current_task", "")
+        issues = strategic_guidance.get("identified_issues", [])
+        recommended_services = strategic_guidance.get("recommended_proactive_services", [])
+
+        # 根据认知状态和用户情境，生成个性化询问
+        cognitive_load = score_result['raw_metrics'].get('cognitive_load', 'unknown')
+
+        # 如果识别了具体问题和服务，优先使用
+        if issues and len(issues) > 0 and recommended_services and len(recommended_services) > 0:
+            # 有明确的问题和解决方案
+            high_severity_issues = [i for i in issues if i.get("severity") == "high"]
+            issue = high_severity_issues[0] if high_severity_issues else issues[0]
+            issue_desc = issue.get("issue", "遇到困难")
+
+            # 找到最高优先级的服务
+            high_priority_services = sorted(
+                recommended_services,
+                key=lambda s: s.get("priority", 0),
+                reverse=True
+            )
+            service = high_priority_services[0]
+            service_content = service.get("service_content", "帮助")
+
+            if "High Load" in cognitive_load:
+                # 高负荷时简短询问
+                return f"看起来您在{issue_desc}，需要{service_content}吗？"
+            else:
+                # 正常负荷时详细询问
+                return f"注意到您{what_doing}时{issue_desc}。需要{service_content}吗？"
+
+        # 如果有服务但没有具体问题
+        elif recommended_services and len(recommended_services) > 0:
+            service = recommended_services[0]
+            service_content = service.get("service_content", "帮助")
+
+            if what_doing and what_doing != "未分析":
+                if "High Load" in cognitive_load:
+                    return f"看起来您在{what_doing}上遇到困难，需要{service_content}吗？"
+                else:
+                    return f"注意到您在{what_doing}，需要{service_content}吗？"
+            else:
+                return f"需要{service_content}吗？"
+
+        # 如果有工作上下文但没有具体服务
+        elif what_doing and what_doing != "未分析":
+            if "High Load" in cognitive_load:
+                return f"看起来您在{what_doing}上遇到困难，需要帮助吗？"
+            else:
+                return f"注意到您在{what_doing}，需要一些帮助吗？"
+
+        # 没有战略指导，使用默认询问
+        else:
+            return "看起来您现在正忙，需要一些帮助吗？"
 
     def _llm_analyze_and_decide(self) -> dict:
         """

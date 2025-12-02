@@ -17,14 +17,21 @@ class DynamicRulesManager:
     动态规则管理器，负责加载、保存和管理主动服务的规则参数。
     这是"快思慢想"系统的核心数据层。
     """
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: str = None, strategic_guidance_path: str = None):
         if config_path is None:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(current_dir)
             config_path = os.path.join(project_root, "config", "dynamic_rules.json")
 
+        if strategic_guidance_path is None:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(current_dir)
+            strategic_guidance_path = os.path.join(project_root, "config", "strategic_guidance.json")
+
         self.config_path = config_path
+        self.strategic_guidance_path = strategic_guidance_path
         self.rules = self._load_rules()
+        self.strategic_guidance = self._load_strategic_guidance()
 
     def _load_rules(self) -> dict:
         """从配置文件加载规则，如果文件不存在则返回默认规则"""
@@ -130,3 +137,67 @@ class DynamicRulesManager:
         self.rules["acceptance_rate"] = new_rate
 
         self.save_rules()
+
+    def _load_strategic_guidance(self) -> dict:
+        """从配置文件加载战略指导，如果文件不存在则返回默认结构"""
+        try:
+            if os.path.exists(self.strategic_guidance_path):
+                with open(self.strategic_guidance_path, 'r', encoding='utf-8') as f:
+                    guidance = json.load(f)
+                    log_message(f"[DynamicRules] 已加载战略指导，最后更新={guidance.get('last_updated')}")
+                    return guidance
+        except Exception as e:
+            log_message(f"[DynamicRules] 加载战略指导失败: {e}，使用默认结构")
+
+        # 默认战略指导（聚焦当前任务和情境）
+        return {
+            "version": "1.0",
+            "last_updated": datetime.now().isoformat(),
+            "analysis_context": {
+                "recent_messages_count": 0,
+                "user_activity_summary": {},
+                "analysis_timestamp": datetime.now().isoformat()
+            },
+            "current_work_context": {
+                "what_user_is_doing": "未分析",
+                "current_task": "未知",
+                "working_environment": {
+                    "primary_app": "",
+                    "open_windows": [],
+                    "tools_in_use": []
+                },
+                "confidence": 0.0
+            },
+            "identified_issues": [],
+            "recommended_proactive_services": [],
+            "reasoning": ""
+        }
+
+    def save_strategic_guidance(self) -> bool:
+        """保存战略指导到配置文件"""
+        try:
+            os.makedirs(os.path.dirname(self.strategic_guidance_path), exist_ok=True)
+            with open(self.strategic_guidance_path, 'w', encoding='utf-8') as f:
+                json.dump(self.strategic_guidance, f, ensure_ascii=False, indent=2)
+            log_message(f"[DynamicRules] 战略指导已保存")
+            return True
+        except Exception as e:
+            log_message(f"[DynamicRules] 保存战略指导失败: {e}")
+            return False
+
+    def update_strategic_guidance(self, new_guidance: dict):
+        """
+        更新战略指导
+
+        Args:
+            new_guidance: 新的战略指导配置
+        """
+        self.strategic_guidance = new_guidance
+        self.strategic_guidance["last_updated"] = datetime.now().isoformat()
+        self.save_strategic_guidance()
+
+    def get_strategic_guidance(self) -> dict:
+        """获取当前战略指导"""
+        # 每次获取时重新加载，确保是最新的
+        self.strategic_guidance = self._load_strategic_guidance()
+        return self.strategic_guidance
