@@ -1,0 +1,44 @@
+{
+  "version": "1.0",
+  "last_updated": "2025-11-13T09:58:25.862055",
+  "total_feedback_count": 1,
+  "acceptance_rate": 0.2,
+  "weights": {
+    "cognitive_load": 0.66,
+    "stuck_bonus": 1.65,
+    "flow_signal": 0.5,
+    "window_switch": 0.4
+  },
+  "thresholds": {
+    "proactive_threshold": 95,
+    "min_threshold": 60,
+    "max_threshold": 150
+  },
+  "adjustment_history": [
+    {
+      "timestamp": "2025-11-13T09:58:25.862071",
+      "trigger": "user_accepted",
+      "old_threshold": 100,
+      "new_threshold": 95,
+      "old_weights": {
+        "cognitive_load": 0.6,
+        "stuck_bonus": 1.5,
+        "flow_signal": 0.5,
+        "window_switch": 0.4
+      },
+      "new_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 0.5,
+        "window_switch": 0.4
+      },
+      "reasoning": "本次干预被用户接受，表明策略判断正确。触发的关键指标是“卡壳检测”(stuck_signal)和“中等认知负荷”(cognitive_load)，说明在用户无操作且认知负荷不低时提供帮助是有效的。因此，应增强这两个关键指标的权重，并略微降低阈值以提高对类似情况的敏感度。",
+      "cognitive_state": "Medium Load",
+      "total_score": 189.0
+    }
+  ],
+  "user_preferences": {
+    "preferred_intervention_states": [],
+    "avoid_intervention_states": []
+  }
+}
