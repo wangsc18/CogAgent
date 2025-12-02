@@ -523,3 +523,107 @@ def get_meta_controller_decision_prompt_ablation(
 格式2 (直接回复/提问): {{"response": "..."}}
 否则视为无效，绝不允许其它字段。
 """
+
+
+
+def get_strategic_conversation_analysis_prompt(
+    messages: List[Any],
+    user_activity: Dict[str, Any],
+    current_guidance: Dict[str, Any]
+) -> str:
+    """
+    规划脑的战略情境分析prompt
+
+    用于：规划脑分析当前工作情境，理解用户正在做什么以及需要什么帮助
+    特点：多模态分析（截屏+对话+活动数据），聚焦当前任务
+    """
+
+    # 将最近的对话转换为可读格式
+    messages_str = ""
+    for i, msg in enumerate(messages[-10:], 1):  # 只分析最近10条消息（更聚焦当前）
+        msg_type = type(msg).__name__
+        content = str(msg.content)[:300]  # 增加到300字符，获取更多上下文
+        messages_str += f"\n{i}. [{msg_type}] {content}"
+
+    current_task = current_guidance.get("current_work_context", {}).get("what_user_is_doing", "未分析")
+
+    return f"""
+你是AI认知伙伴的战略规划模块，负责深度分析用户的**当前工作情境**，理解用户正在做什么以及需要什么帮助。
+
+# 分析任务
+
+基于截屏、对话历史、用户活动数据，回答：
+1. **用户现在在做什么？** 具体的工作任务或项目
+2. **用户的工作环境？** 正在使用的工具、应用、编程语言等
+3. **用户遇到了什么问题？** 当前卡在哪里？什么地方出错了？
+4. **最有价值的主动服务？** 基于当前情境，什么帮助最及时？
+
+# 多模态输入数据
+
+## 1. 最近对话（最近10条消息）
+{messages_str}
+
+## 2. 用户活动数据
+- **认知负荷**: {user_activity.get('cognitive_load', 'unknown')} (置信度: {user_activity.get('confidence', 0):.0%})
+- **键盘活动**: {user_activity.get('keyboard_freq_hz', 0):.2f} Hz
+- **鼠标活动**: {user_activity.get('mouse_freq_hz', 0):.2f} Hz
+- **打开应用数**: {user_activity.get('open_apps_count', 0)}
+- **窗口标题**: {user_activity.get('window_titles', [])}
+
+## 3. 屏幕截图
+（见下方图片）
+
+## 4. 上一次分析结果
+上次识别的任务: {current_task}
+
+# 输出要求
+
+请以JSON格式输出你的情境分析：
+
+```json
+{{
+  "current_work_context": {{
+    "what_user_is_doing": "用户当前正在做什么（1句话，如'编写Python数据分析脚本'）",
+    "current_task": "具体任务描述（如'使用pandas读取和清洗CSV数据'）",
+    "working_environment": {{
+      "primary_app": "主要使用的应用（如'VS Code', 'PyCharm', 'Jupyter'）",
+      "open_windows": ["窗口1", "窗口2"],
+      "tools_in_use": ["工具/语言1", "工具/语言2"]
+    }},
+    "confidence": 0.85
+  }},
+  "identified_issues": [
+    {{
+      "issue": "具体问题描述（如'pandas DataFrame索引错误'）",
+      "evidence": "证据来源（如'从对话中看到IndexError'或'从截屏看到红色错误提示'）",
+      "severity": "high/medium/low",
+      "confidence": 0.8
+    }}
+  ],
+  "recommended_proactive_services": [
+    {{
+      "trigger_condition": "什么情况下触发（如'用户继续遇到索引错误'）",
+      "service_content": "具体的帮助内容（如'提供pandas索引操作速查表'）",
+      "service_type": "reference/example/troubleshooting/automation",
+      "expected_value": "为什么这个帮助有价值（如'直接解决当前错误，节省调试时间'）",
+      "priority": 0.9
+    }}
+  ],
+  "reasoning": "你的分析推理过程（2-3句话，说明你如何从多模态数据推断出上述结论）"
+}}
+```
+
+**关键要求**：
+1. **基于证据**：所有结论必须有明确的证据支撑（对话/截屏/活动数据）
+2. **聚焦当前**：分析当前正在做的事，而非长期目标或历史趋势
+3. **具体可操作**：推荐的服务要具体、可执行，与当前问题紧密相关
+4. **多模态融合**：综合利用对话、截屏、活动数据，不要只依赖单一来源
+5. **置信度诚实**：如果信息不足，将confidence设为较低值
+
+**分析优先级**：
+- 如果看到错误信息（对话或截屏）→ 优先分析错误原因
+- 如果认知负荷高且活动频繁 → 可能在调试或搜索解决方案
+- 如果认知负荷高但活动低 → 可能卡住不知道怎么办
+- 如果窗口频繁切换 → 可能在对比文档或寻找信息
+"""
+

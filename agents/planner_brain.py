@@ -1,29 +1,38 @@
 # agents/planner_brain.py
 """
-规划脑（慢想系统）- 基于用户反馈的策略优化Agent
+规划脑（慢想系统）- 基于用户反馈的策略优化Agent + 战略对话分析
 
 负责：
 1. 接收用户反馈（接受/拒绝主动服务）
 2. 分析触发时的用户状态和决策参数
 3. 使用LLM智能调整规则参数（权重、阈值）
 4. 更新动态规则配置
+5. 【新增】定期分析对话历史，提取长期意图和任务模式
+6. 【新增】生成战略指导，指导执行脑的主动服务方向
 
-调用频率：低频（仅在主动服务触发后）
+调用频率：低频（用户反馈后 + 定期对话分析）
 """
 
 import json
-from typing import Dict, Any
-from langchain_core.messages import HumanMessage
+from typing import Dict, Any, List
+from datetime import datetime
+from langchain_core.messages import HumanMessage, BaseMessage
 from langchain_core.language_models import BaseLanguageModel
 from utils.dynamic_rules import DynamicRulesManager
 from utils.helpers import log_message
-from agents.prompts import get_planner_brain_strategy_update_prompt
+from agents.prompts import (
+    get_planner_brain_strategy_update_prompt,
+    get_strategic_conversation_analysis_prompt
+)
 
 
 class PlannerBrain:
     """
-    规划脑（慢想系统）：负责基于用户反馈分析并更新动态规则策略。
-    只在主动服务触发后调用，频率低但深度高。
+    规划脑（慢想系统）：负责基于用户反馈分析并更新动态规则策略，以及定期战略对话分析。
+
+    两大功能：
+    1. 战术反馈优化：在主动服务触发后，根据用户反馈调整权重和阈值
+    2. 战略对话分析：定期分析对话历史，理解用户长期意图，指导执行脑的服务方向
     """
     def __init__(self, llm: BaseLanguageModel, rules_manager: DynamicRulesManager):
         """
@@ -33,6 +42,7 @@ class PlannerBrain:
         """
         self.llm = llm
         self.rules_manager = rules_manager
+        self.last_strategic_analysis_time = None  # 上次战略分析时间
 
     async def analyze_and_update_strategy(
         self,
@@ -151,4 +161,119 @@ class PlannerBrain:
                 "success": False,
                 "error": str(e),
                 "adjustment_made": False
+            }
+
+    async def analyze_conversation_strategy(
+        self,
+        messages: List[BaseMessage],
+        user_activity: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        【战略情境分析】深度分析当前工作情境，理解用户正在做什么以及需要什么帮助
+
+        Args:
+            messages: 对话消息列表（最近10条）
+            user_activity: 用户实时活动数据（认知负荷、键鼠活动、窗口信息等）
+
+        Returns:
+            战略分析结果字典
+        """
+        try:
+            # 获取当前战略指导
+            current_guidance = self.rules_manager.get_strategic_guidance()
+
+            # 导入截屏工具
+            from utils.helpers import take_screenshot
+            import asyncio
+
+            # 获取屏幕截图
+            screenshot_b64 = await asyncio.to_thread(take_screenshot)
+
+            # 【使用prompts模块】构建战略分析prompt
+            strategic_prompt_text = get_strategic_conversation_analysis_prompt(
+                messages=messages,
+                user_activity=user_activity,
+                current_guidance=current_guidance
+            )
+
+            # 构建多模态消息（文本 + 截图）
+            multimodal_content = [
+                {"type": "text", "text": strategic_prompt_text},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{screenshot_b64}"}}
+            ]
+
+            analyzer_message = HumanMessage(content=multimodal_content)
+
+            log_message("=" * 60)
+            log_message("【规划脑-战略分析】启动多模态情境分析")
+            log_message(f"分析消息数: {len(messages)} 条")
+            log_message(f"用户认知负荷: {user_activity.get('cognitive_load', 'unknown')}")
+            log_message(f"打开应用: {user_activity.get('window_titles', [])}")
+
+            # 调用LLM进行战略分析
+            response = await self.llm.ainvoke([analyzer_message])
+            response_content = response.content.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+
+            log_message(f"战略分析原始响应: {response_content[:500]}...")
+
+            # 解析LLM响应
+            strategic_analysis = json.loads(response_content)
+
+            # 提取关键信息
+            work_context = strategic_analysis.get("current_work_context", {})
+            issues = strategic_analysis.get("identified_issues", [])
+            recommended_services = strategic_analysis.get("recommended_proactive_services", [])
+            reasoning = strategic_analysis.get("reasoning", "")
+
+            log_message("=" * 60)
+            log_message("【战略分析结果】")
+            log_message(f"用户正在做: {work_context.get('what_user_is_doing', 'N/A')}")
+            log_message(f"当前任务: {work_context.get('current_task', 'N/A')}")
+            log_message(f"主要应用: {work_context.get('working_environment', {}).get('primary_app', 'N/A')}")
+            log_message(f"识别问题数: {len(issues)}")
+            log_message(f"推荐服务数: {len(recommended_services)}")
+            log_message(f"分析理由: {reasoning[:200]}...")
+            log_message("=" * 60)
+
+            # 构建新的战略指导
+            new_guidance = {
+                "version": "1.0",
+                "last_updated": datetime.now().isoformat(),
+                "analysis_context": {
+                    "recent_messages_count": len(messages),
+                    "user_activity_summary": {
+                        "cognitive_load": user_activity.get("cognitive_load", "unknown"),
+                        "confidence": user_activity.get("confidence", 0.0),
+                        "keyboard_hz": user_activity.get("keyboard_freq_hz", 0),
+                        "mouse_hz": user_activity.get("mouse_freq_hz", 0),
+                        "window_titles": user_activity.get("window_titles", [])
+                    },
+                    "analysis_timestamp": datetime.now().isoformat()
+                },
+                "current_work_context": work_context,
+                "identified_issues": issues,
+                "recommended_proactive_services": recommended_services,
+                "reasoning": reasoning
+            }
+
+            # 更新战略指导
+            self.rules_manager.update_strategic_guidance(new_guidance)
+            self.last_strategic_analysis_time = datetime.now()
+
+            log_message("✓ 战略指导已更新并保存")
+
+            return {
+                "success": True,
+                "strategic_guidance": new_guidance,
+                "reasoning": reasoning
+            }
+
+        except Exception as e:
+            log_message(f"【战略分析错误】{e}")
+            import traceback
+            traceback.print_exc()
+
+            return {
+                "success": False,
+                "error": str(e)
             }
