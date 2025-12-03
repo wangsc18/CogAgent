@@ -45,8 +45,6 @@ hypercorn web_app:app --bind 0.0.0.0:5001
 - **屏幕录制**：窗口信息获取
 - **摄像头**：认知负荷检测
 
-详见 [INSTALL_MACOS.md](INSTALL_MACOS.md)
-
 ## 3. 系统架构
 
 ### 核心设计："快思慢想"双脑系统
