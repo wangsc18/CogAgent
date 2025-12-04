@@ -125,7 +125,7 @@ def initialize_system():
     #    - Planner: 需要高级ToM推理
     #    - 认知效益分析: 需要多模态分析
     llm_pro = RobustChatOpenAI(
-        model='gemini-3-pro-preview',
+        model='gpt-4o',
         temperature=0,
         openai_api_key=os.getenv('OPENAI_API_KEY'),
         openai_api_base=base_url if base_url else None
@@ -135,7 +135,7 @@ def initialize_system():
     #    - LLM状态决策: 每30秒调用，纯文本，结构化输出
     #    - Memory Agent: 极低频，总结任务
     llm_flash = RobustChatOpenAI(
-        model='gemini-2.0-flash',
+        model='gpt-4o-mini',
         temperature=0,
         openai_api_key=os.getenv('OPENAI_API_KEY'),
         openai_api_base=base_url if base_url else None
