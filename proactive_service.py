@@ -3,7 +3,8 @@ import time
 import asyncio
 import uuid
 from datetime import datetime, timedelta
-from agents.executor_brain import UserStateModeler  # 【更新】使用新的执行脑模块
+from agents.executor_brain import UserStateModeler  # 【实验组】动态规则 + 认知效益
+from agents.pum_baseline import PUMBaseline  # 【对照组】固定规则 + 通用帮助
 from utils import activity_monitor, face_thread
 from utils.helpers import get_real_time_user_activity, log_message  # 确保 log_message 被导入
 
@@ -12,7 +13,15 @@ UPDATE_INTERVAL_SECONDS = 5
 # 【核心修复】创建一个全局标志来跟踪监控器是否已启动
 _monitors_started = False
 
-async def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache, llm=None, llm_planner=None, decision_mode="heuristic"):
+async def proactive_monitoring_loop(
+    sessions_dict,
+    msg_queue,
+    request_cache,
+    llm=None,
+    llm_planner=None,
+    decision_mode="heuristic",
+    experiment_mode="experimental"
+):
     """
     监控循环。
 
@@ -23,6 +32,7 @@ async def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache, llm
         llm: LangChain LLM实例，用于执行脑的LLM决策模式（可选）
         llm_planner: LangChain LLM实例，用于规划脑的策略分析（推荐使用更强大的模型）
         decision_mode: 决策模式 "heuristic"（推荐） 或 "llm" (默认: "heuristic")
+        experiment_mode: 实验模式 "experimental"（实验组-动态规则+认知效益） 或 "baseline"（对照组-固定规则+通用帮助）
     """
     global _monitors_started # 声明我们要修改的是全局变量
 
@@ -47,18 +57,33 @@ async def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache, llm
             # 如果监控器启动失败，这个后台任务就没有意义了，直接退出。
             return
 
-    # 创建用户状态建模器（执行脑），传递LLM和规划脑的LLM
-    log_message(f"--- Initializing UserStateModeler (ExecutorBrain) with decision_mode={decision_mode} ---")
-    modeler = UserStateModeler(
-        observation_period_seconds=30,
-        history_limit=6,
-        llm=llm,  # 用于LLM决策模式（可选）
-        llm_planner=llm_planner,  # 【新增】用于规划脑策略分析
-        decision_mode=decision_mode
-    )
-
-    print(f"--- Proactive Service Thread Started. Updating state every {UPDATE_INTERVAL_SECONDS}s. ---")
-    print(f"--- Strategic Analysis will trigger at key moments (errors, consecutive triggers, high load). ---")
+    # 【实验模式选择】根据配置创建不同的建模器
+    if experiment_mode == "baseline":
+        # 【对照组】使用固定规则的PUM基线模块
+        log_message("=" * 80)
+        log_message("【对照组模式启动】PUM Baseline - 固定规则 + 通用帮助")
+        log_message("=" * 80)
+        modeler = PUMBaseline(
+            observation_period_seconds=30,
+            history_limit=6
+        )
+        print(f"--- Proactive Service (BASELINE) Started. Updating state every {UPDATE_INTERVAL_SECONDS}s. ---")
+        print(f"--- Using FIXED rules, NO dynamic learning, NO cognitive benefit analysis. ---")
+    else:
+        # 【实验组】使用动态规则 + 认知效益的完整系统
+        log_message("=" * 80)
+        log_message("【实验组模式启动】Full System - 动态规则 + 认知效益")
+        log_message("=" * 80)
+        log_message(f"--- Initializing UserStateModeler (ExecutorBrain) with decision_mode={decision_mode} ---")
+        modeler = UserStateModeler(
+            observation_period_seconds=30,
+            history_limit=6,
+            llm=llm,  # 用于LLM决策模式（可选）
+            llm_planner=llm_planner,  # 【新增】用于规划脑策略分析
+            decision_mode=decision_mode
+        )
+        print(f"--- Proactive Service (EXPERIMENTAL) Started. Updating state every {UPDATE_INTERVAL_SECONDS}s. ---")
+        print(f"--- Strategic Analysis will trigger at key moments (errors, consecutive triggers, high load). ---")
 
     while True:
         try:
@@ -77,8 +102,9 @@ async def proactive_monitoring_loop(sessions_dict, msg_queue, request_cache, llm
                     "confidence": current_activity.get("confidence", 0.0)
                 }
 
-                # 【智能触发战略分析】在关键时刻触发，而不是定期触发
-                if modeler.planner_brain is not None:
+                # 【智能触发战略分析】仅在实验组模式下启用
+                # 对照组不进行战略分析，保持固定规则
+                if experiment_mode == "experimental" and hasattr(modeler, 'planner_brain') and modeler.planner_brain is not None:
                     should_analyze = False
                     reason = ""
 

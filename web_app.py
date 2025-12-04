@@ -30,6 +30,7 @@ from state import AgentState
 from agents.meta_controller import run_meta_controller
 from agents.tool_manager import run_tool_manager
 from agents.executor_brain import UserStateModeler  # 【更新】使用新的执行脑模块
+from agents.pum_baseline import PUMBaseline  # 【新增】对照组基线模块
 from agents.memory_agent import run_memory_agent
 from proactive_service import proactive_monitoring_loop
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -274,6 +275,16 @@ async def startup_background_tasks():
     # 从环境变量读取决策模式配置，默认使用heuristic模式（快思慢想架构）
     decision_mode = os.getenv("PROACTIVE_DECISION_MODE", "heuristic")  # "heuristic" 或 "llm"
 
+    # 【新增】从环境变量读取实验模式配置
+    # "experimental" = 实验组（动态规则 + 认知效益分析）
+    # "baseline" = 对照组（固定规则 + 通用帮助）
+    experiment_mode = os.getenv("EXPERIMENT_MODE", "experimental")
+
+    log_message("=" * 80)
+    log_message(f"【实验配置】EXPERIMENT_MODE = {experiment_mode}")
+    log_message(f"【决策配置】PROACTIVE_DECISION_MODE = {decision_mode}")
+    log_message("=" * 80)
+
     # 【快思慢想架构】主动服务使用：
     # - 执行脑（快思）：使用Flash模型进行高频状态判断（每30秒）
     # - 规划脑（慢想）：使用Pro模型进行策略分析（仅在用户反馈后）
@@ -284,7 +295,8 @@ async def startup_background_tasks():
         request_cache=pending_assistance_requests,
         llm=llm_flash,  # 执行脑使用Flash模型（快速高频决策）
         llm_planner=llm_pro,  # 【新增】规划脑使用Pro模型（复杂策略分析）
-        decision_mode=decision_mode
+        decision_mode=decision_mode,
+        experiment_mode=experiment_mode  # 【新增】实验模式配置
     )
     
 # --- 路由定义 ---
@@ -418,10 +430,14 @@ async def request_assistance():
         context_to_process = pending_assistance_requests.pop(request_id, None)
         if not context_to_process: return jsonify({"error": "Invalid or expired assistance request."}), 404
 
+        # 读取实验模式配置
+        experiment_mode = os.getenv("EXPERIMENT_MODE", "experimental")
+
         # 【新增】用户接受了主动服务，触发规划脑更新策略（慢想系统）
+        # 仅在实验组模式下启用规划脑
         trigger_context = context_to_process.get("trigger_context_for_planner")
-        if trigger_context and planner_brain_global:
-            log_message("[WebApp] 用户接受主动服务，触发规划脑策略更新")
+        if experiment_mode == "experimental" and trigger_context and planner_brain_global:
+            log_message("[WebApp] 用户接受主动服务，触发规划脑策略更新（实验组）")
             # 异步调用规划脑（不阻塞主流程）
             asyncio.create_task(
                 planner_brain_global.analyze_and_update_strategy(
@@ -430,12 +446,19 @@ async def request_assistance():
                 )
             )
 
-        # 1. 调用 Analyzer Agent 进行分析（使用Pro模型进行深度多模态分析）
-        analysis_result = await UserStateModeler.analyze_user_context_and_suggest(
-            context=context_to_process,
-            llm=llm_pro,  # 使用Pro模型（需要多模态分析和复杂推理）
-            tools_config=tools_config
-        )
+        # 1. 根据实验模式选择不同的帮助生成方式
+        if experiment_mode == "baseline":
+            # 【对照组】使用简单的通用帮助生成
+            log_message("【对照组】使用PUM基线模块生成通用帮助")
+            analysis_result = PUMBaseline.generate_simple_suggestion(context=context_to_process)
+        else:
+            # 【实验组】调用认知效益分析器（使用Pro模型进行深度多模态分析）
+            log_message("【实验组】使用认知效益分析器生成个性化帮助")
+            analysis_result = await UserStateModeler.analyze_user_context_and_suggest(
+                context=context_to_process,
+                llm=llm_pro,  # 使用Pro模型（需要多模态分析和复杂推理）
+                tools_config=tools_config
+            )
 
         # 提取selected_intervention（新的数据结构）
         selected = analysis_result.get("selected_intervention", {})
@@ -450,15 +473,28 @@ async def request_assistance():
                 "response": error_msg
             })
 
-        # 2. 基于认知效益分析结果，构建"Handoff"消息给主Agent
-        # 提取认知效益指标
-        offloading_benefit = selected.get("offloading_benefit", 0)
-        interaction_cost = selected.get("interaction_cost", 0)
-        success_probability = selected.get("success_probability", 0.0)
-        net_benefit = selected.get("net_cognitive_benefit", 0)
-        intervention_type = selected.get("intervention_type", "unknown")
+        # 2. 根据实验模式构建不同的Handoff消息
+        if experiment_mode == "baseline":
+            # 【对照组】简化的prompt，不包含认知效益指标
+            handoff_prompt = f"""
+我刚刚确认需要帮助。系统给出了以下通用建议：
 
-        handoff_prompt = f"""
+【建议内容】
+{suggestion_text}
+
+请根据这个建议继续操作。
+"""
+            analysis_message = f"【对照组-通用帮助】{suggestion_text[:50]}..."
+        else:
+            # 【实验组】完整的认知效益分析prompt
+            # 提取认知效益指标
+            offloading_benefit = selected.get("offloading_benefit", 0)
+            interaction_cost = selected.get("interaction_cost", 0)
+            success_probability = selected.get("success_probability", 0.0)
+            net_benefit = selected.get("net_cognitive_benefit", 0)
+            intervention_type = selected.get("intervention_type", "unknown")
+
+            handoff_prompt = f"""
 我刚刚确认需要帮助。我的认知伙伴分析了我的情况，并基于认知效益最大化原则给出了以下建议：
 
 【用户状态分析】
@@ -480,6 +516,7 @@ async def request_assistance():
 
 请根据这个建议继续操作。如果涉及工具调用，请直接准备并执行它。
 """
+            analysis_message = f"【实验组-认知效益分析】净效益: {net_benefit} | 建议: {suggestion_text[:50]}..."
 
         # 3. 将Handoff消息作为用户输入，送入主工作流
         state = await get_session_state(session_id)
@@ -489,7 +526,7 @@ async def request_assistance():
         await save_session_state(session_id, final_state)
 
         return jsonify({
-                "analysis_message": f"【认知效益分析】净效益: {net_benefit} | 建议: {suggestion_text}",
+                "analysis_message": analysis_message,
                 "response": final_state['messages'][-1].content
             })
 
@@ -519,14 +556,18 @@ async def reject_assistance():
         if not context_to_process:
             return jsonify({"error": "Invalid or expired assistance request."}), 404
 
+        # 读取实验模式配置
+        experiment_mode = os.getenv("EXPERIMENT_MODE", "experimental")
+
         # 用户拒绝了主动服务，触发规划脑更新策略（慢想系统）
+        # 仅在实验组模式下启用规划脑
         trigger_context = context_to_process.get("trigger_context_for_planner")
-        if trigger_context and planner_brain_global:
+        if experiment_mode == "experimental" and trigger_context and planner_brain_global:
             # 【关键】在 trigger_context 中添加拒绝类型信息
             trigger_context["rejection_type"] = rejection_type
 
             rejection_type_text = "显式拒绝" if rejection_type == "explicit" else "超时无响应"
-            log_message(f"[WebApp] 用户拒绝主动服务（{rejection_type_text}），触发规划脑策略更新")
+            log_message(f"[WebApp] 用户拒绝主动服务（{rejection_type_text}），触发规划脑策略更新（实验组）")
 
             # 异步调用规划脑（不阻塞主流程）
             asyncio.create_task(
@@ -535,6 +576,8 @@ async def reject_assistance():
                     trigger_context=trigger_context
                 )
             )
+        elif experiment_mode == "baseline":
+            log_message(f"[WebApp] 用户拒绝主动服务（对照组模式，不更新策略）")
 
         return jsonify({
             "status": "rejected",
