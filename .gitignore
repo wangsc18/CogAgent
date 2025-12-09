@@ -32,7 +32,4 @@ Thumbs.db
 *.jpg
 *.jpeg
 
-# 模型
-*.pth
-
 CLAUDE.md
