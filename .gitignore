@@ -25,6 +25,7 @@ sessions/
 .idea/
 .DS_Store
 Thumbs.db
+.pth
 
 # 其他你不想上传的文件或文件夹
 # 比如临时图片、用户数据等
