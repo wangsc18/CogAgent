@@ -5,6 +5,35 @@ import json
 import csv
 import random
 
+# --- 自定义问卷定义 (主动服务评估) ---
+CUSTOM_QUESTIONS = [
+    {
+        "id": "Q1",
+        "text": "助手在恰当的时刻打断了我。",
+        "description": "评估助手选择打断时机的准确性"
+    },
+    {
+        "id": "Q2",
+        "text": "助手知道什么时候该让我安静思考。",
+        "description": "评估助手对用户需要专注时刻的识别能力"
+    },
+    {
+        "id": "Q3",
+        "text": "助手提供的帮助值得我去响应这次打断。",
+        "description": "评估主动服务的价值是否超过打断成本"
+    },
+    {
+        "id": "Q4",
+        "text": "助手准确理解了我当时试图完成的任务。",
+        "description": "评估助手对用户意图和任务的理解程度"
+    },
+    {
+        "id": "Q5",
+        "text": "助手似乎能根据我的反应调整它的行为。",
+        "description": "评估助手的适应性和学习能力"
+    }
+]
+
 # --- NASA-TLX 定义 ---
 NASA_DIMENSIONS = {
     "MD": {"name": "Mental Demand (心理需求)", "description": "在任务中，您需要进行多少心理和感知活动（如思考、决策、记忆、观察）？"},
@@ -55,17 +84,20 @@ UEQ_CSV_HEADER = [f'Item{i+1}' for i in range(26)]
 class NasaTlxUeqApp:
     def __init__(self, master):
         self.master = master
-        self.master.title("NASA-TLX & UEQ 综合评估问卷")
+        self.master.title("主动服务评估 & NASA-TLX & UEQ 综合问卷")
         self.master.geometry("800x900")
 
         self.participant_id_var = tk.StringVar()
         self.system_condition_var = tk.StringVar()
-        
+
+        # 自定义问卷变量
+        self.custom_vars = {q['id']: tk.IntVar(value=4) for q in CUSTOM_QUESTIONS}
+
         self.tlx_ratings_vars = {dim: tk.IntVar() for dim in NASA_DIMENSIONS}
         self.tlx_weights = {dim: 0 for dim in NASA_DIMENSIONS}
         self.current_pair_index = 0
         self.selected_weight_var = tk.StringVar()
-        
+
         self.ueq_vars = {item['id']: tk.IntVar(value=4) for item in UEQ_ITEMS}
         self.ueq_display_reversal = {} # 用于记录每个问题项在显示时是否被反转
 
@@ -75,25 +107,105 @@ class NasaTlxUeqApp:
         self.main_frame = ttk.Frame(self.master, padding="10")
         self.main_frame.pack(fill=tk.BOTH, expand=True)
 
+        self.custom_frame = ttk.Frame(self.main_frame)
         self.tlx_ratings_frame = ttk.Frame(self.main_frame)
         self.tlx_weighting_frame = ttk.Frame(self.main_frame)
         self.ueq_frame = ttk.Frame(self.main_frame)
-        
+
+        self.create_custom_page()
         self.create_tlx_ratings_page()
         self.create_tlx_weighting_page()
         self.create_ueq_page()
 
-        self.tlx_ratings_frame.pack(fill=tk.BOTH, expand=True)
+        self.custom_frame.pack(fill=tk.BOTH, expand=True)
 
-    def create_tlx_ratings_page(self):
-        ttk.Label(self.tlx_ratings_frame, text="第一部分：NASA-TLX 维度评分", font=("Helvetica", 16, "bold")).pack(pady=10)
-        
-        id_frame = ttk.Frame(self.tlx_ratings_frame)
+    def create_custom_page(self):
+        """创建自定义问卷页面 (主动服务评估)"""
+        ttk.Label(self.custom_frame, text="第一部分：主动服务体验评估", font=("Helvetica", 16, "bold")).pack(pady=10)
+        ttk.Label(
+            self.custom_frame,
+            text="请根据您在刚才任务中与助手交互的体验,对以下陈述进行评分。\n1 = 完全不同意, 4 = 中立, 7 = 完全同意",
+            wraplength=750,
+            justify=tk.LEFT,
+            font=("Helvetica", 11)
+        ).pack(pady=10)
+
+        # 被试信息输入
+        id_frame = ttk.Frame(self.custom_frame)
         ttk.Label(id_frame, text="被试ID:", font=("Helvetica", 12)).pack(side="left", padx=(0, 5))
         ttk.Entry(id_frame, textvariable=self.participant_id_var, width=20).pack(side="left")
         ttk.Label(id_frame, text="系统条件:", font=("Helvetica", 12)).pack(side="left", padx=(10, 5))
         ttk.Entry(id_frame, textvariable=self.system_condition_var, width=20).pack(side="left")
-        id_frame.pack(pady=10)
+        id_frame.pack(pady=15)
+
+        # 创建滚动区域
+        canvas = tk.Canvas(self.custom_frame, height=400)
+        scrollbar = ttk.Scrollbar(self.custom_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # 鼠标滚轮支持
+        def _on_mousewheel(event):
+            if event.num == 5 or event.delta < 0:
+                canvas.yview_scroll(1, "units")
+            elif event.num == 4 or event.delta > 0:
+                canvas.yview_scroll(-1, "units")
+
+        for widget in [canvas, scrollable_frame]:
+            widget.bind("<MouseWheel>", _on_mousewheel)
+            widget.bind("<Button-4>", _on_mousewheel)
+            widget.bind("<Button-5>", _on_mousewheel)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # 添加问题
+        for question in CUSTOM_QUESTIONS:
+            q_id = question['id']
+            frame = ttk.Frame(scrollable_frame, padding=(10, 15))
+
+            # 问题文本
+            ttk.Label(
+                frame,
+                text=f"{q_id}: {question['text']}",
+                font=("Helvetica", 12, "bold"),
+                wraplength=700
+            ).pack(anchor="w", pady=(0, 5))
+
+            # 评分标尺
+            scale_frame = ttk.Frame(frame)
+            ttk.Label(scale_frame, text="完全不同意", font=("Helvetica", 10)).pack(side="left", padx=(0, 10))
+
+            radio_container = ttk.Frame(scale_frame)
+            for i in range(1, 8):
+                rb = ttk.Radiobutton(radio_container, text=str(i), variable=self.custom_vars[q_id], value=i)
+                rb.pack(side="left", padx=12)
+                rb.bind("<MouseWheel>", _on_mousewheel)
+                rb.bind("<Button-4>", _on_mousewheel)
+                rb.bind("<Button-5>", _on_mousewheel)
+            radio_container.pack(side="left")
+
+            ttk.Label(scale_frame, text="完全同意", font=("Helvetica", 10)).pack(side="left", padx=(10, 0))
+            scale_frame.pack(pady=5)
+
+            ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=10)
+            frame.pack(fill="x", padx=20)
+
+        ttk.Button(self.custom_frame, text="完成评估，进入NASA-TLX问卷", command=self.switch_to_tlx).pack(pady=20, side="bottom")
+
+    def switch_to_tlx(self):
+        """从自定义问卷切换到NASA-TLX"""
+        if not self.participant_id_var.get() or not self.system_condition_var.get():
+            messagebox.showwarning("信息不全", "请输入被试ID和系统条件后再继续。")
+            return
+        self.custom_frame.pack_forget()
+        self.tlx_ratings_frame.pack(fill=tk.BOTH, expand=True)
+
+    def create_tlx_ratings_page(self):
+        ttk.Label(self.tlx_ratings_frame, text="第二部分：NASA-TLX 维度评分", font=("Helvetica", 16, "bold")).pack(pady=10)
 
         for key, value in NASA_DIMENSIONS.items():
             frame = ttk.Frame(self.tlx_ratings_frame, padding=(0, 10))
@@ -110,7 +222,7 @@ class NasaTlxUeqApp:
         ttk.Button(self.tlx_ratings_frame, text="完成评分，进入负荷权重比较", command=self.switch_to_weighting).pack(pady=20)
 
     def create_tlx_weighting_page(self):
-        ttk.Label(self.tlx_weighting_frame, text="第二部分：NASA-TLX 权重比较", font=("Helvetica", 16, "bold")).pack(pady=10)
+        ttk.Label(self.tlx_weighting_frame, text="第三部分：NASA-TLX 权重比较", font=("Helvetica", 16, "bold")).pack(pady=10)
         ttk.Label(self.tlx_weighting_frame, text="在每一对中，请选择对您刚才任务的工作负荷贡献更大的维度。", wraplength=650).pack(pady=10)
 
         self.pair_counter_label = ttk.Label(self.tlx_weighting_frame, text="", font=("Helvetica", 12))
@@ -124,7 +236,7 @@ class NasaTlxUeqApp:
         self.next_button.pack(pady=20)
     
     def create_ueq_page(self):
-        ttk.Label(self.ueq_frame, text="第三部分：用户体验问卷 (UEQ)", font=("Helvetica", 16, "bold")).pack(pady=10)
+        ttk.Label(self.ueq_frame, text="第四部分：用户体验问卷 (UEQ)", font=("Helvetica", 16, "bold")).pack(pady=10)
         ttk.Label(self.ueq_frame, text="请根据您对刚才使用系统的整体感受，在每一对形容词之间选择最符合您看法的位置。", wraplength=750).pack(pady=5)
 
         canvas = tk.Canvas(self.ueq_frame)
@@ -186,9 +298,6 @@ class NasaTlxUeqApp:
         ttk.Button(self.ueq_frame, text="完成所有问卷，计算并保存结果", command=self.calculate_and_save_results).pack(pady=20, side="bottom")
 
     def switch_to_weighting(self):
-        if not self.participant_id_var.get() or not self.system_condition_var.get():
-            messagebox.showwarning("信息不全", "请输入被试ID和系统条件后再继续。")
-            return
         self.tlx_ratings_frame.pack_forget()
         self.tlx_weighting_frame.pack(fill=tk.BOTH, expand=True)
         self.display_current_pair()
@@ -255,6 +364,9 @@ class NasaTlxUeqApp:
         return formatted_scores
 
     def calculate_and_save_results(self):
+        # 收集自定义问卷数据
+        custom_scores = {q_id: var.get() for q_id, var in self.custom_vars.items()}
+
         tlx_weighted_sum = sum(self.tlx_ratings_vars[key].get() * self.tlx_weights[key] for key in NASA_DIMENSIONS)
         final_tlx_score = tlx_weighted_sum / 15 if sum(self.tlx_weights.values()) > 0 else 0
 
@@ -262,10 +374,10 @@ class NasaTlxUeqApp:
         tlx_raw_scores = {key: self.tlx_ratings_vars[key].get() for key in NASA_DIMENSIONS}
 
         ueq_data_row = self.get_formatted_ueq_data()
-        
+
         participant_id = self.participant_id_var.get()
         system_condition = self.system_condition_var.get()
-        
+
         try:
             with open("assessment_results_summary.txt", "a", encoding="utf-8") as f:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -273,6 +385,10 @@ class NasaTlxUeqApp:
                 f.write(f"评估时间: {timestamp}\n")
                 f.write(f"被试 ID: {participant_id}\n")
                 f.write(f"系统条件: {system_condition}\n")
+                f.write("-------------------------------------------------\n")
+                f.write("主动服务体验评估 (7点量表):\n")
+                for q in CUSTOM_QUESTIONS:
+                    f.write(f"{q['id']}: {q['text'][:30]}... => {custom_scores[q['id']]}\n")
                 f.write("-------------------------------------------------\n")
                 f.write("NASA-TLX 各维度原始分数:\n")
                 for key, value in NASA_DIMENSIONS.items():
@@ -288,29 +404,32 @@ class NasaTlxUeqApp:
             try:
                 with open(csv_file, 'x', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
-                    writer.writerow(['Participant_ID', 'System_Condition', 'TLX_Score'] + UEQ_CSV_HEADER)
+                    custom_headers = [f'Custom_{q["id"]}' for q in CUSTOM_QUESTIONS]
+                    writer.writerow(['Participant_ID', 'System_Condition'] + custom_headers + ['TLX_Score'] + UEQ_CSV_HEADER)
             except FileExistsError:
                 pass
 
             with open(csv_file, "a", newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                writer.writerow([participant_id, system_condition, f"{final_tlx_score:.2f}"] + ueq_data_row)
-            
+                custom_values = [custom_scores[q['id']] for q in CUSTOM_QUESTIONS]
+                writer.writerow([participant_id, system_condition] + custom_values + [f"{final_tlx_score:.2f}"] + ueq_data_row)
+
             save_confirmation = "\n结果已成功保存到 .txt 和 .csv 文件中。"
 
         except Exception as e:
             save_confirmation = f"\n\n警告：结果保存失败！\n错误: {e}"
             messagebox.showerror("文件保存错误", f"无法写入结果文件。\n请检查文件权限。\n\n错误详情: {e}")
-        
+
         display_text = (
             f"被试ID: {participant_id}\n"
             f"系统条件: {system_condition}\n\n"
+            f"主动服务评估已记录。\n"
             f"NASA-TLX 负荷分数: {final_tlx_score:.2f}\n"
             f"UEQ 问卷已记录。"
             f"{save_confirmation}"
         )
         messagebox.showinfo("评估完成", display_text)
-        
+
         self.master.destroy()
 
 if __name__ == "__main__":
