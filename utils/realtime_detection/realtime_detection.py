@@ -254,7 +254,12 @@ class RealtimeCognitiveLoadDetector:
 
     def run_detection(self):
         """运行实时检测"""
-        cap = cv2.VideoCapture(0)  # 打开摄像头
+        # Windows 平台优先使用 DirectShow 后端
+        if PLATFORM == "Windows":
+            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            print("使用 DirectShow 后端")
+        else:
+            cap = cv2.VideoCapture(0)
 
         if not cap.isOpened():
             print("无法打开摄像头")
@@ -273,12 +278,71 @@ class RealtimeCognitiveLoadDetector:
         current_load = "Waiting for data..."
         current_confidence = 0.0
 
+        # 资源管理计数器
+        frame_count = 0
+        RESET_INTERVAL = 1500  # 每1500帧(约1分钟)重建摄像头对象
+        CACHE_CLEAR_INTERVAL = 750  # 每750帧清理一次缓存
+        consecutive_failures = 0  # 连续失败计数
+        MAX_FAILURES = 10  # 最大连续失败次数
+
         try:
             while True:
                 ret, frame = cap.read()
                 if not ret:
-                    print("无法读取摄像头画面")
-                    break
+                    consecutive_failures += 1
+                    print(f"无法读取摄像头画面 (连续失败: {consecutive_failures}/{MAX_FAILURES})")
+
+                    # 达到最大失败次数，尝试重连
+                    if consecutive_failures >= MAX_FAILURES:
+                        print("摄像头连接丢失，尝试重新连接...")
+                        cap.release()
+                        time.sleep(1)
+
+                        if PLATFORM == "Windows":
+                            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+                        else:
+                            cap = cv2.VideoCapture(0)
+
+                        if cap.isOpened():
+                            print("摄像头重连成功")
+                            consecutive_failures = 0
+                            continue
+                        else:
+                            print("摄像头重连失败，退出检测")
+                            break
+
+                    time.sleep(0.1)
+                    continue
+
+                # 读取成功，重置失败计数
+                consecutive_failures = 0
+                frame_count += 1
+
+                # 定期清理缓存（每750帧）
+                if frame_count % CACHE_CLEAR_INTERVAL == 0:
+                    if self.device.type == 'cuda' and torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        print(f"[维护] 已清理 CUDA 缓存 (帧: {frame_count})")
+                    elif self.device.type == 'mps' and hasattr(torch.backends, 'mps'):
+                        # MPS 不支持 empty_cache，但可以触发垃圾回收
+                        import gc
+                        gc.collect()
+                        print(f"[维护] 已触发垃圾回收 (帧: {frame_count})")
+
+                # 定期重建摄像头对象（每1500帧）
+                if frame_count % RESET_INTERVAL == 0:
+                    print(f"[维护] 定期重建摄像头对象 (帧: {frame_count})")
+                    cap.release()
+                    time.sleep(0.2)
+
+                    if PLATFORM == "Windows":
+                        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+                    else:
+                        cap = cv2.VideoCapture(0)
+
+                    if not cap.isOpened():
+                        print("摄像头重建失败，退出检测")
+                        break
 
                 # 添加帧到缓存
                 self.frame_buffer.append(frame.copy())
@@ -318,27 +382,33 @@ class RealtimeCognitiveLoadDetector:
 
                 # 在画面上显示结果 (仅在非 headless 模式)
                 if not self.headless:
-                    # 绘制检测框
-                    if self.face_detector is not None:
-                        _, face_box = self.detect_and_crop_face(frame)
-                        if face_box is not None:  # 检测到人脸
-                            x1, y1, x2, y2 = face_box
-                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    try:
+                        # 绘制检测框
+                        if self.face_detector is not None:
+                            _, face_box = self.detect_and_crop_face(frame)
+                            if face_box is not None:  # 检测到人脸
+                                x1, y1, x2, y2 = face_box
+                                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-                    # 显示文本信息
-                    cv2.putText(frame, f"Cognitive Load: {current_load}", (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                    cv2.putText(frame, f"Confidence: {current_confidence:.3f}", (10, 60),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (147,20,255), 2)
-                    cv2.putText(frame, f"Buffer: {len(self.frame_buffer)}/{self.frames_per_segment}", (10, 90),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+                        # 显示文本信息
+                        cv2.putText(frame, f"Cognitive Load: {current_load}", (10, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                        cv2.putText(frame, f"Confidence: {current_confidence:.3f}", (10, 60),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (147,20,255), 2)
+                        cv2.putText(frame, f"Buffer: {len(self.frame_buffer)}/{self.frames_per_segment}", (10, 90),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+                        cv2.putText(frame, f"Frames: {frame_count}", (10, 120),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 165, 0), 2)
 
-                    # 显示画面
-                    cv2.imshow('Real-time cognitive load detection', frame)
+                        # 显示画面
+                        cv2.imshow('Real-time cognitive load detection', frame)
 
-                    # 检查按键
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
-                        break
+                        # 检查按键
+                        if cv2.waitKey(1) & 0xFF == ord('q'):
+                            break
+                    except Exception as e:
+                        print(f"GUI 渲染异常: {e}")
+                        # GUI 出错不影响后台检测继续运行
                 else:
                     # headless 模式：检查停止信号
                     if self._stop_event is not None and self._stop_event.is_set():
@@ -346,11 +416,19 @@ class RealtimeCognitiveLoadDetector:
                     # 添加小延迟避免 CPU 占用过高
                     time.sleep(0.01)
 
+        except KeyboardInterrupt:
+            print("\n[信息] 用户中断检测")
+        except Exception as e:
+            print(f"[错误] 检测过程中发生异常: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
+            print(f"[信息] 清理资源... (总帧数: {frame_count})")
             self.input_monitor.stop()
             cap.release()
             if not self.headless:
                 cv2.destroyAllWindows()
+            print("[信息] 摄像头已释放")
 
 if __name__ == "__main__":
     import os

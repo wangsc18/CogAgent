@@ -1,16 +1,16 @@
 {
   "version": "1.0",
-  "last_updated": "2025-12-10T15:37:02.278528",
-  "total_feedback_count": 2,
-  "acceptance_rate": 0.16000000000000003,
+  "last_updated": "2025-12-17T15:24:41.112848",
+  "total_feedback_count": 12,
+  "acceptance_rate": 0.01717986918400001,
   "weights": {
     "cognitive_load": 0.66,
     "stuck_bonus": 1.65,
-    "flow_signal": 0.8,
+    "flow_signal": 2.8,
     "window_switch": 0.4
   },
   "thresholds": {
-    "proactive_threshold": 105,
+    "proactive_threshold": 410,
     "min_threshold": 60,
     "max_threshold": 150
   },
@@ -56,6 +56,216 @@
       "reasoning": "用户明确拒绝，认知负荷高但活动低，可能误判心流状态。flow_signal权重过低，未能准确识别用户状态。",
       "cognitive_state": "High Load",
       "total_score": 222.17
+    },
+    {
+      "timestamp": "2025-12-17T15:10:10.505631",
+      "trigger": "user_rejected",
+      "old_threshold": 105,
+      "new_threshold": 126,
+      "old_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 0.8,
+        "window_switch": 0.4
+      },
+      "new_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 1.12,
+        "window_switch": 0.4
+      },
+      "reasoning": "用户超时无响应，可能处于沉浸心流状态，键盘频率为0.00Hz，鼠标频率为0.33Hz，表明用户可能专注于当前任务。",
+      "cognitive_state": "Medium Load",
+      "total_score": 223.1
+    },
+    {
+      "timestamp": "2025-12-17T15:14:45.783011",
+      "trigger": "user_rejected",
+      "old_threshold": 126,
+      "new_threshold": 145,
+      "old_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 1.12,
+        "window_switch": 0.4
+      },
+      "new_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 1.56,
+        "window_switch": 0.4
+      },
+      "reasoning": "用户在超时无响应的情况下，可能处于沉浸心流状态，认知负荷为Medium Load且无键盘鼠标活动，表明用户可能专注于当前任务。",
+      "cognitive_state": "Medium Load",
+      "total_score": 205.92
+    },
+    {
+      "timestamp": "2025-12-17T15:17:12.939673",
+      "trigger": "user_rejected",
+      "old_threshold": 145,
+      "new_threshold": 174,
+      "old_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 1.56,
+        "window_switch": 0.4
+      },
+      "new_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 2.0,
+        "window_switch": 0.4
+      },
+      "reasoning": "用户未在20秒内响应，可能处于沉浸心流状态，flow_signal权重过低导致误判。",
+      "cognitive_state": "Medium Load",
+      "total_score": 214.44
+    },
+    {
+      "timestamp": "2025-12-17T15:18:15.929995",
+      "trigger": "user_rejected",
+      "old_threshold": 174,
+      "new_threshold": 200,
+      "old_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 2.0,
+        "window_switch": 0.4
+      },
+      "new_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 2.6,
+        "window_switch": 0.4
+      },
+      "reasoning": "用户未响应可能是因为处于沉浸心流状态（键盘和鼠标频率为0，窗口切换为0，且卡壳信号为是）。当前flow_signal权重较低，未能有效识别心流状态。",
+      "cognitive_state": "Medium Load",
+      "total_score": 207.9
+    },
+    {
+      "timestamp": "2025-12-17T15:19:41.264365",
+      "trigger": "user_rejected",
+      "old_threshold": 200,
+      "new_threshold": 230,
+      "old_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 2.6,
+        "window_switch": 0.4
+      },
+      "new_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 3.64,
+        "window_switch": 0.4
+      },
+      "reasoning": "用户超时无响应，可能处于沉浸心流状态，键盘和鼠标频率为0，窗口切换次数为0，表明用户可能专注于当前任务。",
+      "cognitive_state": "Medium Load",
+      "total_score": 207.24
+    },
+    {
+      "timestamp": "2025-12-17T15:21:11.690320",
+      "trigger": "user_rejected",
+      "old_threshold": 230,
+      "new_threshold": 250,
+      "old_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 3.64,
+        "window_switch": 0.4
+      },
+      "new_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 3.64,
+        "window_switch": 0.4
+      },
+      "reasoning": "用户在超时无响应的情况下，键盘和鼠标活动频率较低，可能未注意到弹窗。决策分数接近阈值，需提高阈值以减少误判。",
+      "cognitive_state": "Medium Load",
+      "total_score": 206.38
+    },
+    {
+      "timestamp": "2025-12-17T15:21:44.029025",
+      "trigger": "user_rejected",
+      "old_threshold": 250,
+      "new_threshold": 280,
+      "old_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 3.64,
+        "window_switch": 0.4
+      },
+      "new_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 3.64,
+        "window_switch": 0.4
+      },
+      "reasoning": "用户在超时无响应的情况下未接受服务，且键盘和鼠标活动频率较低，可能未注意到弹窗。",
+      "cognitive_state": "Medium Load",
+      "total_score": 212.63
+    },
+    {
+      "timestamp": "2025-12-17T15:22:11.056302",
+      "trigger": "user_rejected",
+      "old_threshold": 280,
+      "new_threshold": 322,
+      "old_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 3.64,
+        "window_switch": 0.4
+      },
+      "new_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 2.0,
+        "window_switch": 0.4
+      },
+      "reasoning": "用户超时无响应，可能处于沉浸心流状态，键盘和鼠标频率为0，窗口切换次数为0，表明用户可能专注于当前任务。",
+      "cognitive_state": "Medium Load",
+      "total_score": 206.58
+    },
+    {
+      "timestamp": "2025-12-17T15:24:11.410300",
+      "trigger": "user_rejected",
+      "old_threshold": 322,
+      "new_threshold": 370,
+      "old_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 2.0,
+        "window_switch": 0.4
+      },
+      "new_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 2.8,
+        "window_switch": 0.4
+      },
+      "reasoning": "用户超时无响应，可能处于沉浸心流状态，键盘和鼠标频率为0Hz，表明用户可能专注于当前任务。",
+      "cognitive_state": "Medium Load",
+      "total_score": 207.24
+    },
+    {
+      "timestamp": "2025-12-17T15:24:41.112855",
+      "trigger": "user_rejected",
+      "old_threshold": 370,
+      "new_threshold": 410,
+      "old_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 2.8,
+        "window_switch": 0.4
+      },
+      "new_weights": {
+        "cognitive_load": 0.66,
+        "stuck_bonus": 1.65,
+        "flow_signal": 2.8,
+        "window_switch": 0.4
+      },
+      "reasoning": "用户超时无响应，且键盘和鼠标频率为0，可能未注意到弹窗。认知负荷为Medium Load，卡壳检测为是，表明用户可能需要帮助。",
+      "cognitive_state": "Medium Load",
+      "total_score": 207.9
     }
   ],
   "user_preferences": {
